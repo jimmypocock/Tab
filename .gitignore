@@ -1,0 +1,187 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+.env.production
+.env.development
+.env.test
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# drizzle
+/drizzle
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Test artifacts
+test-results/
+playwright-report/
+*.lcov
+coverage.json
+.nyc_output
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+
+# Logs
+logs
+*.log
+error.log
+access.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Stripe CLI
+.stripe/
+
+# Supabase
+.supabase/
+supabase/.branches
+supabase/.temp
+
+# Database
+*.sql
+!supabase/migrations/*.sql
+!supabase/seed.sql
+*.sqlite
+*.sqlite3
+*.db
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+*.der
+*.p12
+*.pfx
+
+# API keys and secrets
+*.env.*
+!.env.example
+!.env.template
+api_keys.txt
+secrets.txt
+credentials.json
+service-account.json
+
+# Session data
+sessions/
+.sessions/
+
+# Upload directories
+uploads/
+public/uploads/
+public/temp/
+
+# Build artifacts
+dist/
+build/
+out/
+.next/
+.nuxt/
+.turbo/
+
+# Package files
+*.tgz
+*.tar.gz
+*.zip
+
+# Monitoring and profiling
+.clinic/
+.tap/
+*.heapsnapshot
+*.0x/
+
+# Testing
+test-*.js
+!test-*.example.js
+
+# Local development
+local-data/
+.local/
+
+# macOS specific
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows specific
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux specific
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
