@@ -6,7 +6,7 @@ import { generateApiKey } from '@/lib/api/keys'
 import { revalidatePath } from 'next/cache'
 
 export async function createNewApiKey(name: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -64,7 +64,7 @@ export async function createNewApiKey(name: string) {
 }
 
 export async function deleteApiKey(keyId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -86,7 +86,7 @@ export async function deleteApiKey(keyId: string) {
 }
 
 export async function getApiKeys() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {

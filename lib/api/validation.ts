@@ -121,7 +121,7 @@ export const stripeWebhookSchema = z.object({
   object: z.string(),
   type: z.string(),
   data: z.object({
-    object: z.record(z.unknown()),
+    object: z.record(z.string(), z.unknown()),
   }),
 })
 
@@ -138,7 +138,7 @@ export const apiSuccessSchema = <T extends z.ZodType>(dataSchema: T) =>
   z.object({
     success: z.literal(true),
     data: dataSchema,
-    meta: z.record(z.unknown()).optional(),
+    meta: z.record(z.string(), z.unknown()).optional(),
   })
 
 // Type exports
@@ -170,7 +170,7 @@ export function validateInput<T>(
 }
 
 export function formatZodError(error: z.ZodError): string {
-  return error.errors
+  return error.issues
     .map(err => `${err.path.join('.')}: ${err.message}`)
     .join(', ')
 }

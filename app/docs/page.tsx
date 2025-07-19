@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, Book, Code, FileText, Zap, Play, Globe, Webhook, Shield, Gauge } from 'lucide-react'
+import { ArrowLeft, Book, Code, Zap, Play, Globe, Webhook, Shield, Gauge } from 'lucide-react'
 
 const docSections = [
   {
@@ -106,7 +106,7 @@ export default function DocsPage() {
             Everything you need to integrate Tab
           </h1>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            From quick starts to detailed API references, find all the resources you need to implement Tab's payment collection API.
+            From quick starts to detailed API references, find all the resources you need to implement Tab&apos;s payment collection API.
           </p>
         </div>
       </section>
@@ -161,7 +161,7 @@ export default function DocsPage() {
               Start collecting payments in minutes
             </h2>
             <p className="text-lg text-gray-400">
-              Here's a quick example to get you started
+              Here&apos;s a quick example to get you started
             </p>
           </div>
           <div className="max-w-4xl mx-auto">

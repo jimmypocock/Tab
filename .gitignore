@@ -155,6 +155,12 @@ out/
 # Testing
 test-*.js
 !test-*.example.js
+*.skip
+*.skip2
+*-simple.test.*
+*-debug.test.*
+*-temp.test.*
+api-simplified.test.ts
 
 # Local development
 local-data/

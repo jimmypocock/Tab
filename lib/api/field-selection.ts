@@ -60,6 +60,7 @@ export function applyFieldSelection<T extends Record<string, any>>(
   for (const field of Array.from(fields)) {
     if (field.includes('.')) {
       const [parent, ...rest] = field.split('.')
+      if (!parent) continue
       const childField = rest.join('.')
       
       if (!nestedFields.has(parent)) {

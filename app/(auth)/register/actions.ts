@@ -9,7 +9,7 @@ export async function registerWithApiKey(
   password: string,
   businessName: string
 ): Promise<{ success: boolean; error?: string; apiKey?: string }> {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   // Create auth user
   const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -39,7 +39,7 @@ export async function registerWithApiKey(
   
   if (!result.success) {
     // Clean up auth user if merchant setup fails
-    const adminClient = createClient()
+    const adminClient = await createClient()
     await adminClient.auth.admin.deleteUser(authData.user.id)
     return result
   }

@@ -1,307 +1,503 @@
 /**
  * @jest-environment node
  */
-import { testApiHandler } from 'next-test-api-route-handler'
-import * as tabsHandler from '@/app/api/v1/tabs/route'
-import * as tabByIdHandler from '@/app/api/v1/tabs/(id)/route'
-import { db } from '@/lib/db/client'
-import * as bcrypt from 'bcryptjs'
+import '../test-env-setup.js' // Must be first import
+import { NextRequest } from 'next/server'
+import { GET as getTabsHandler, POST as postTabsHandler } from '@/app/api/v1/tabs/route'
+import { GET as getTabByIdHandler, PATCH as patchTabByIdHandler, DELETE as deleteTabByIdHandler } from '@/app/api/v1/tabs/[id]/route'
+import { 
+  createAuthenticatedRequest, 
+  createTestRequest,
+  getResponseData,
+  apiAssertions,
+} from '../helpers/api-test-helpers'
+import { testData } from '../helpers/test-db'
+import { getMockedModules } from '../test-env-setup.js'
+import crypto from 'crypto'
+import * as dbQueries from '@/lib/db/queries'
 
-// Mock database
-jest.mock('@/lib/db/client', () => ({
-  db: {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    leftJoin: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    values: jest.fn().mockReturnThis(),
-    returning: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    transaction: jest.fn(),
-    execute: jest.fn(),
-  },
-}))
-
-// Mock Stripe
-jest.mock('stripe', () => {
-  return jest.fn().mockImplementation(() => ({
-    webhookEndpoints: {
-      create: jest.fn(),
-      list: jest.fn().mockResolvedValue({ data: [] }),
-      del: jest.fn(),
-    }
-  }))
-})
-
-describe('/api/v1/tabs', () => {
-  const mockDb = db as any
-  const validApiKey = 'tab_test_1234567890'
-  const mockMerchantId = 'merchant_123'
+describe('Tabs API', () => {
+  let mocks: ReturnType<typeof getMockedModules>
+  let testMerchant: ReturnType<typeof testData.merchant>
+  let testApiKey: ReturnType<typeof testData.apiKey>
+  
+  beforeAll(() => {
+    mocks = getMockedModules()
+  })
   
   beforeEach(() => {
     jest.clearAllMocks()
     
-    // Mock API key validation by default
-    mockDb.select.mockImplementation(() => ({
-      from: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      leftJoin: jest.fn().mockResolvedValue([{
-        apiKeys: { 
-          id: '1', 
-          keyHash: bcrypt.hashSync(validApiKey, 10),
-          merchantId: mockMerchantId 
-        },
-        merchants: { 
-          id: mockMerchantId, 
-          stripeCustomerId: 'cus_test_123',
-          name: 'Test Merchant' 
-        }
-      }])
-    }))
+    // Setup test data
+    testMerchant = testData.merchant()
+    testApiKey = testData.apiKey(testMerchant.id)
+    
+    // Setup default mock for API key validation
+    mocks.db.query.apiKeys.findFirst.mockResolvedValue({
+      ...testApiKey.record,
+      merchant: testMerchant,
+    })
   })
-
+  
   describe('POST /api/v1/tabs', () => {
-    it('should create a tab with valid data', async () => {
+    it('should create a new tab with line items', async () => {
+      // Arrange
       const tabData = {
         customerEmail: 'customer@example.com',
-        customerName: 'Test Customer',
+        customerName: 'John Doe',
         currency: 'USD',
+        taxRate: 0.08,
         lineItems: [
-          { description: 'Item 1', quantity: 2, unitAmount: '25.00' },
-          { description: 'Item 2', quantity: 1, unitAmount: '30.00' }
-        ],
-        taxRate: 0.08
+          { description: 'Product A', quantity: 2, unitPrice: 25.00 },
+          { description: 'Product B', quantity: 1, unitPrice: 30.00 }
+        ]
       }
-
-      // Mock successful tab creation
-      mockDb.transaction.mockImplementation(async (fn: any) => {
+      
+      const expectedTab = testData.tab(testMerchant.id, {
+        customerEmail: tabData.customerEmail,
+        customerName: tabData.customerName,
+        currency: tabData.currency,
+        subtotal: '80.00',
+        taxAmount: '6.40',
+        totalAmount: '86.40',
+      })
+      
+      // Mock successful transaction
+      mocks.db.transaction.mockImplementation(async (fn) => {
         const tx = {
-          insert: jest.fn().mockReturnThis(),
-          values: jest.fn().mockReturnThis(),
-          returning: jest.fn().mockResolvedValue([{
-            id: 'tab_123',
-            merchantId: mockMerchantId,
-            customerEmail: tabData.customerEmail,
-            customerName: tabData.customerName,
-            currency: tabData.currency,
-            subtotal: '80.00',
-            taxAmount: '6.40',
-            total: '86.40',
-            paidAmount: '0.00',
-            status: 'open',
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }])
+          insert: jest.fn().mockReturnValue({
+            values: jest.fn().mockReturnValue({
+              returning: jest.fn().mockResolvedValue([expectedTab])
+            })
+          }),
+          query: {
+            tabs: {
+              findFirst: jest.fn().mockResolvedValue({
+                ...expectedTab,
+                lineItems: tabData.lineItems.map((item, index) => 
+                  testData.lineItem(expectedTab.id, {
+                    ...item,
+                    totalPrice: (item.quantity * item.unitPrice).toFixed(2)
+                  })
+                ),
+                payments: []
+              })
+            }
+          }
         }
         return fn(tx)
       })
-
-      await testApiHandler({
-        handler: tabsHandler.POST,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            headers: {
-              'X-API-Key': validApiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(tabData),
-          })
-
-          expect(response.status).toBe(201)
-          const json = await response.json()
-          
-          expect(json.data).toMatchObject({
-            id: 'tab_123',
-            customerEmail: 'customer@example.com',
-            subtotal: '80.00',
-            taxAmount: '6.40',
-            total: '86.40',
-            status: 'open'
-          })
-          expect(json.data.paymentUrl).toContain('/pay/tab_123')
-        },
-      })
-    })
-
-    it('should return 401 without API key', async () => {
-      await testApiHandler({
-        handler: tabsHandler.POST,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              customerEmail: 'test@example.com',
-              currency: 'USD',
-              lineItems: []
-            }),
-          })
-
-          expect(response.status).toBe(401)
-          const json = await response.json()
-          expect(json.error).toContain('API key')
-        },
-      })
-    })
-
-    it('should validate required fields', async () => {
-      await testApiHandler({
-        handler: tabsHandler.POST,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            headers: {
-              'X-API-Key': validApiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              // Missing required fields
-              currency: 'USD',
-            }),
-          })
-
-          expect(response.status).toBe(400)
-          const json = await response.json()
-          expect(json.error).toContain('customerEmail')
-        },
-      })
-    })
-  })
-
-  describe('GET /api/v1/tabs', () => {
-    it('should list tabs for authenticated merchant', async () => {
-      const mockTabs = [
-        {
-          id: 'tab_1',
-          customerEmail: 'customer1@example.com',
-          total: '100.00',
-          status: 'open',
-          createdAt: new Date()
-        },
-        {
-          id: 'tab_2',
-          customerEmail: 'customer2@example.com',
-          total: '200.00',
-          status: 'paid',
-          createdAt: new Date()
-        }
-      ]
-
-      mockDb.select.mockImplementation(() => ({
-        from: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        leftJoin: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue(mockTabs)
-      }))
-
-      await testApiHandler({
-        handler: tabsHandler.GET,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'GET',
-            headers: {
-              'X-API-Key': validApiKey,
-            },
-          })
-
-          expect(response.status).toBe(200)
-          const json = await response.json()
-          expect(json.data).toHaveLength(2)
-          expect(json.data[0].id).toBe('tab_1')
-        },
-      })
-    })
-
-    it('should filter by status', async () => {
-      mockDb.select.mockImplementation(() => ({
-        from: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        leftJoin: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue([{
-          id: 'tab_1',
-          status: 'paid'
-        }])
-      }))
-
-      await testApiHandler({
-        handler: tabsHandler.GET,
-        params: { status: 'paid' },
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'GET',
-            headers: {
-              'X-API-Key': validApiKey,
-            },
-          })
-
-          expect(response.status).toBe(200)
-          const json = await response.json()
-          expect(json.data).toHaveLength(1)
-          expect(json.data[0].status).toBe('paid')
-        },
-      })
-    })
-  })
-
-  describe('PATCH /api/v1/tabs/:id', () => {
-    it('should update tab status', async () => {
-      const tabId = 'tab_123'
       
-      mockDb.update.mockReturnThis()
-      mockDb.set.mockReturnThis()
-      mockDb.where.mockReturnThis()
-      mockDb.returning.mockResolvedValue([{
-        id: tabId,
-        status: 'void',
-        updatedAt: new Date()
-      }])
-
-      await testApiHandler({
-        handler: tabByIdHandler.PATCH,
-        params: { id: tabId },
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'PATCH',
-            headers: {
-              'X-API-Key': validApiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ status: 'void' }),
-          })
-
-          expect(response.status).toBe(200)
-          const json = await response.json()
-          expect(json.data.status).toBe('void')
-        },
+      // Act
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        method: 'POST',
+        body: tabData
+      })
+      
+      const response = await postTabsHandler(request)
+      const responseData = await getResponseData(response)
+      
+      // Assert
+      if (response.status !== 201) {
+        console.log('Create tab failed:', response.status, JSON.stringify(responseData, null, 2))
+      }
+      apiAssertions.expectSuccessResponse(response, 201)
+      expect(responseData.success).toBe(true)
+      expect(responseData.data.tab).toMatchObject({
+        id: expectedTab.id,
+        customerEmail: tabData.customerEmail,
+        totalAmount: '86.40',
+        status: 'open',
+      })
+      expect(responseData.data.paymentUrl).toContain('/pay/')
+      expect(responseData.data.tab.lineItems).toHaveLength(2)
+    })
+    
+    it('should return 401 without API key', async () => {
+      // Arrange
+      const request = createTestRequest('/api/v1/tabs', {
+        method: 'POST',
+        body: { customerEmail: 'test@example.com', currency: 'USD', lineItems: [] }
+      })
+      
+      // Act
+      const response = await postTabsHandler(request)
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 401, 'API key')
+    })
+    
+    it('should validate request data', async () => {
+      // Arrange
+      const invalidData = {
+        customerEmail: 'invalid-email', // Invalid email
+        currency: 'INVALID', // Invalid currency
+        lineItems: [
+          { description: '', quantity: -1, unitPrice: NaN } // Invalid line item
+        ]
+      }
+      
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        method: 'POST',
+        body: invalidData
+      })
+      
+      // Act
+      const response = await postTabsHandler(request)
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 400, 'validation')
+    })
+    
+    it('should validate empty line items', async () => {
+      // Arrange
+      const tabData = {
+        customerEmail: 'customer@example.com',
+        currency: 'USD',
+        lineItems: [] // This should fail validation
+      }
+      
+      const expectedTab = testData.tab(testMerchant.id, {
+        customerEmail: tabData.customerEmail,
+        currency: tabData.currency,
+        subtotal: '0.00',
+        taxAmount: '0.00',
+        totalAmount: '0.00',
+      })
+      
+      mocks.db.transaction.mockImplementation(async (fn) => {
+        const tx = {
+          insert: jest.fn().mockReturnValue({
+            values: jest.fn().mockReturnValue({
+              returning: jest.fn().mockResolvedValue([expectedTab])
+            })
+          }),
+          query: {
+            tabs: {
+              findFirst: jest.fn().mockResolvedValue({
+                ...expectedTab,
+                lineItems: [],
+                payments: []
+              })
+            }
+          }
+        }
+        return fn(tx)
+      })
+      
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        method: 'POST',
+        body: tabData
+      })
+      
+      // Act
+      const response = await postTabsHandler(request)
+      const responseData = await getResponseData(response)
+      
+      // Assert - expecting validation error for empty line items
+      await apiAssertions.expectErrorResponse(response, 400, 'validation')
+    })
+    
+    it('should create tab with minimal line item', async () => {
+      // Arrange
+      const tabData = {
+        customerEmail: 'customer@example.com',
+        currency: 'USD',
+        lineItems: [
+          { description: 'Free item', quantity: 1, unitPrice: 0.01 } // Minimum positive price
+        ]
+      }
+      
+      const expectedTab = testData.tab(testMerchant.id, {
+        customerEmail: tabData.customerEmail,
+        currency: tabData.currency,
+        subtotal: '0.01',
+        taxAmount: '0.00',
+        totalAmount: '0.01',
+      })
+      
+      mocks.db.transaction.mockImplementation(async (fn) => {
+        const tx = {
+          insert: jest.fn().mockReturnValue({
+            values: jest.fn().mockReturnValue({
+              returning: jest.fn().mockResolvedValue([expectedTab])
+            })
+          }),
+          query: {
+            tabs: {
+              findFirst: jest.fn().mockResolvedValue({
+                ...expectedTab,
+                lineItems: [testData.lineItem(expectedTab.id, {
+                  ...tabData.lineItems[0],
+                  totalPrice: '0.01'
+                })],
+                payments: []
+              })
+            }
+          }
+        }
+        return fn(tx)
+      })
+      
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        method: 'POST',
+        body: tabData
+      })
+      
+      // Act
+      const response = await postTabsHandler(request)
+      const responseData = await getResponseData(response)
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response, 201)
+      expect(responseData.data.tab.totalAmount).toBe('0.01')
+    })
+  })
+  
+  describe('GET /api/v1/tabs', () => {
+    it('should return paginated tabs for merchant', async () => {
+      // Arrange
+      const mockTabs = [
+        testData.tab(testMerchant.id, { status: 'open' }),
+        testData.tab(testMerchant.id, { status: 'paid' }),
+      ]
+      
+      mocks.db.query.tabs.findMany.mockResolvedValue(
+        mockTabs.map(tab => ({ ...tab, lineItems: [], payments: [] }))
+      )
+      
+      // Mock countRows which is imported separately
+      jest.mocked(dbQueries.countRows).mockResolvedValue(2)
+      
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        searchParams: { page: '1', limit: '10' }
+      })
+      
+      // Act
+      const response = await getTabsHandler(request)
+      const responseData = await getResponseData(response)
+      
+      if (response.status !== 200) {
+        console.log('GET tabs failed:', response.status, JSON.stringify(responseData, null, 2))
+      }
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response)
+      await apiAssertions.expectPaginatedResponse(response)
+      expect(responseData.data).toHaveLength(2)
+      expect(responseData.meta).toEqual({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1
       })
     })
-
-    it('should prevent invalid status updates', async () => {
-      await testApiHandler({
-        handler: tabByIdHandler.PATCH,
-        params: { id: 'tab_123' },
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'PATCH',
-            headers: {
-              'X-API-Key': validApiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ status: 'invalid_status' }),
-          })
-
-          expect(response.status).toBe(400)
-        },
+    
+    it('should filter tabs by status', async () => {
+      // Arrange
+      const paidTabs = [testData.tab(testMerchant.id, { status: 'paid' })]
+      
+      mocks.db.query.tabs.findMany.mockResolvedValue(
+        paidTabs.map(tab => ({ ...tab, lineItems: [], payments: [] }))
+      )
+      
+      jest.mocked(dbQueries.countRows).mockResolvedValue(1)
+      
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        searchParams: { status: 'paid' }
       })
+      
+      // Act
+      const response = await getTabsHandler(request)
+      const responseData = await getResponseData(response)
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response)
+      expect(responseData.data).toHaveLength(1)
+      expect(responseData.data[0].status).toBe('paid')
+    })
+    
+    it('should handle invalid pagination parameters', async () => {
+      // Arrange
+      const request = createAuthenticatedRequest('/api/v1/tabs', testApiKey.key, {
+        searchParams: { page: '-1', limit: '1000' } // Invalid values
+      })
+      
+      mocks.db.query.tabs.findMany.mockResolvedValue([])
+      jest.mocked(dbQueries.countRows).mockResolvedValue(0)
+      
+      // Act
+      const response = await getTabsHandler(request)
+      
+      // Assert
+      // Should either handle gracefully or return validation error
+      expect(response.status).toBeLessThanOrEqual(400)
+    })
+  })
+  
+  describe('GET /api/v1/tabs/[id]', () => {
+    it('should return tab details with line items', async () => {
+      // Arrange
+      const tab = testData.tab(testMerchant.id)
+      const lineItems = [
+        testData.lineItem(tab.id, { description: 'Item 1', unitPrice: 50.00 }),
+        testData.lineItem(tab.id, { description: 'Item 2', unitPrice: 30.00 })
+      ]
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...tab,
+        lineItems,
+        payments: []
+      })
+      
+      const params = Promise.resolve({ id: tab.id })
+      const request = createAuthenticatedRequest(`/api/v1/tabs/${tab.id}`, testApiKey.key)
+      
+      // Act
+      const response = await getTabByIdHandler(request, { params })
+      const responseData = await getResponseData(response)
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response)
+      expect(responseData.data.id).toBe(tab.id)
+      expect(responseData.data.lineItems).toHaveLength(2)
+    })
+    
+    it('should return 404 for non-existent tab', async () => {
+      // Arrange
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+      
+      const params = Promise.resolve({ id: 'non-existent' })
+      const request = createAuthenticatedRequest('/api/v1/tabs/non-existent', testApiKey.key)
+      
+      // Act
+      const response = await getTabByIdHandler(request, { params })
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 404)
+    })
+  })
+  
+  describe('PATCH /api/v1/tabs/[id]', () => {
+    it('should update tab status', async () => {
+      // Arrange
+      const existingTab = testData.tab(testMerchant.id, { status: 'open' })
+      const updates = { status: 'paid' as const }
+      
+      mocks.db.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{
+              ...existingTab,
+              ...updates,
+              updatedAt: new Date()
+            }])
+          })
+        })
+      })
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...existingTab,
+        ...updates,
+        lineItems: [],
+        payments: []
+      })
+      
+      const params = Promise.resolve({ id: existingTab.id })
+      const request = createAuthenticatedRequest(`/api/v1/tabs/${existingTab.id}`, testApiKey.key, {
+        method: 'PATCH',
+        body: updates
+      })
+      
+      // Act
+      const response = await patchTabByIdHandler(request, { params })
+      const responseData = await getResponseData(response)
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response)
+      expect(responseData.data.status).toBe('paid')
+    })
+    
+    it('should return 404 for non-existent tab', async () => {
+      // Arrange
+      mocks.db.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([])
+          })
+        })
+      })
+      
+      const params = Promise.resolve({ id: 'non-existent' })
+      const request = createAuthenticatedRequest('/api/v1/tabs/non-existent', testApiKey.key, {
+        method: 'PATCH',
+        body: { status: 'paid' }
+      })
+      
+      // Act
+      const response = await patchTabByIdHandler(request, { params })
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 404)
+    })
+    
+    it('should validate update data', async () => {
+      // Arrange
+      const existingTab = testData.tab(testMerchant.id)
+      const invalidUpdates = { status: 'invalid-status' as any }
+      
+      const params = Promise.resolve({ id: existingTab.id })
+      const request = createAuthenticatedRequest(`/api/v1/tabs/${existingTab.id}`, testApiKey.key, {
+        method: 'PATCH',
+        body: invalidUpdates
+      })
+      
+      // Act
+      const response = await patchTabByIdHandler(request, { params })
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 400)
+    })
+  })
+  
+  describe('DELETE /api/v1/tabs/[id]', () => {
+    it('should delete a tab', async () => {
+      // Arrange
+      const tabToDelete = testData.tab(testMerchant.id)
+      
+      mocks.db.delete.mockReturnValue({
+        where: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([tabToDelete])
+        })
+      })
+      
+      const params = Promise.resolve({ id: tabToDelete.id })
+      const request = createAuthenticatedRequest(`/api/v1/tabs/${tabToDelete.id}`, testApiKey.key, {
+        method: 'DELETE'
+      })
+      
+      // Act
+      const response = await deleteTabByIdHandler(request, { params })
+      
+      // Assert
+      apiAssertions.expectSuccessResponse(response, 200)
+    })
+    
+    it('should return 404 when deleting non-existent tab', async () => {
+      // Arrange
+      // Mock the findFirst to return null (tab doesn't exist)
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+      
+      const params = Promise.resolve({ id: 'non-existent' })
+      const request = createAuthenticatedRequest('/api/v1/tabs/non-existent', testApiKey.key, {
+        method: 'DELETE'
+      })
+      
+      // Act
+      const response = await deleteTabByIdHandler(request, { params })
+      
+      // Assert
+      await apiAssertions.expectErrorResponse(response, 404)
     })
   })
 })

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
 export default async function TabsPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   
@@ -68,7 +68,6 @@ export default async function TabsPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {tabs?.map((tab) => {
               const itemCount = tab.line_items[0]?.count || 0
-              const balance = parseFloat(tab.total_amount) - parseFloat(tab.paid_amount)
               
               return (
                 <tr key={tab.id} className="hover:bg-gray-50">
@@ -122,7 +121,7 @@ export default async function TabsPage() {
         {(!tabs || tabs.length === 0) && (
           <div className="text-center py-12 text-gray-500">
             <p className="mb-4">No tabs yet.</p>
-            <p className="text-sm">Create your first tab using the API or click "New Tab" above.</p>
+            <p className="text-sm">Create your first tab using the API or click &quot;New Tab&quot; above.</p>
           </div>
         )}
       </div>

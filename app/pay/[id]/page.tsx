@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { CreditCard, Loader2, Shield } from 'lucide-react'
 
@@ -31,11 +31,7 @@ export default function PaymentPage() {
   const [amount, setAmount] = useState('')
   const [processing, setProcessing] = useState(false)
 
-  useEffect(() => {
-    fetchTab()
-  }, [params.id])
-
-  const fetchTab = async () => {
+  const fetchTab = useCallback(async () => {
     try {
       const response = await fetch(`/api/v1/public/tabs/${params.id}`)
       if (!response.ok) {
@@ -49,7 +45,11 @@ export default function PaymentPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.id])
+
+  useEffect(() => {
+    fetchTab()
+  }, [fetchTab])
 
   const handlePayment = async () => {
     if (!tab || !email) return
@@ -247,7 +247,7 @@ export default function PaymentPage() {
             <span>Secure payment via Stripe</span>
           </div>
           <p className="text-xs text-gray-500">
-            You will be redirected to Stripe's secure checkout page.
+            You will be redirected to Stripe&apos;s secure checkout page.
             We never see or store your card information.
           </p>
         </div>

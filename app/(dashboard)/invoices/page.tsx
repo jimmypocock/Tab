@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { FileText, Send, Eye } from 'lucide-react'
 
 export default async function InvoicesPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   

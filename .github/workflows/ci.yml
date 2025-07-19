@@ -67,7 +67,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
       
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         if: success()
         with:
           file: ./coverage/lcov.info
@@ -148,7 +148,7 @@ jobs:
           output: 'trivy-results.sarif'
       
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'

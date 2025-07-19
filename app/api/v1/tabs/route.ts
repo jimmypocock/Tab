@@ -4,15 +4,13 @@ import { tabs, lineItems } from '@/lib/db/schema'
 import { withApiAuth, parseJsonBody, ApiContext } from '@/lib/api/middleware'
 import { createTabSchema, tabQuerySchema, validateInput } from '@/lib/api/validation'
 import { 
-  createSuccessResponse, 
-  createErrorResponse,
+  createSuccessResponse,
   ApiResponseBuilder 
 } from '@/lib/api/response'
 import { CacheConfigs } from '@/lib/api/cache'
 import { 
   ValidationError, 
-  DatabaseError,
-  NotFoundError 
+  DatabaseError
 } from '@/lib/errors'
 import { logger } from '@/lib/logger'
 import { 
@@ -21,7 +19,7 @@ import {
   getTabStatus,
   PAGINATION_MAX_LIMIT 
 } from '@/lib/utils'
-import { eq, and, gte, lte, like, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, like } from 'drizzle-orm'
 import { countRows } from '@/lib/db/queries'
 import { 
   parseFieldSelection, 
@@ -38,7 +36,7 @@ export async function POST(request: NextRequest) {
     // Validate input
     const validation = validateInput(createTabSchema, body)
     if (!validation.success) {
-      throw new ValidationError('Invalid request data', validation.error.errors)
+      throw new ValidationError('Invalid request data', validation.error.issues)
     }
 
     const data = validation.data
@@ -76,6 +74,10 @@ export async function POST(request: NextRequest) {
           totalAmount: totalAmount.toFixed(2),
           metadata: data.metadata || null,
         }).returning()
+
+        if (!newTab) {
+          throw new DatabaseError('Failed to create tab')
+        }
 
         // Create line items
         if (lineItemsData.length > 0) {
@@ -153,7 +155,7 @@ export async function GET(request: NextRequest) {
     // Validate query parameters
     const validation = validateInput(tabQuerySchema, queryParams)
     if (!validation.success) {
-      throw new ValidationError('Invalid query parameters', validation.error.errors)
+      throw new ValidationError('Invalid query parameters', validation.error.issues)
     }
 
     const query = validation.data
@@ -244,6 +246,6 @@ export async function GET(request: NextRequest) {
 }
 
 // Handle OPTIONS for CORS
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS(_request: NextRequest) {
   return createSuccessResponse({}, undefined, 204)
 }

@@ -11,7 +11,7 @@ export async function setupMerchantWithApiKey(
   email: string,
   businessName: string
 ): Promise<{ success: boolean; error?: string; apiKey?: string }> {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   try {
     // Start a transaction-like operation

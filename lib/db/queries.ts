@@ -1,20 +1,21 @@
 import { db } from './client'
 import { sql } from 'drizzle-orm'
-import { PgTable } from 'drizzle-orm/pg-core'
 
 // Helper to count rows with conditions
-export async function countRows<T extends PgTable>(
-  table: T,
+export async function countRows(
+  table: any,
   where?: any
 ): Promise<number> {
-  const query = db
-    .select({ count: sql<number>`count(*)` })
-    .from(table)
-  
   if (where) {
-    query.where(where)
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(table)
+      .where(where)
+    return Number(result[0]?.count || 0)
+  } else {
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(table)
+    return Number(result[0]?.count || 0)
   }
-  
-  const result = await query
-  return Number(result[0]?.count || 0)
 }

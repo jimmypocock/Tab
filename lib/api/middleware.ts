@@ -283,7 +283,7 @@ export async function withApiAuth(
 export function createApiResponse(
   data: any,
   status: number = 200,
-  headers?: HeadersInit
+  _headers?: HeadersInit
 ) {
   console.warn('createApiResponse is deprecated. Use createSuccessResponse instead.')
   return createSuccessResponse(data, undefined, status)
@@ -291,9 +291,9 @@ export function createApiResponse(
 
 export function createApiError(
   message: string,
-  status: number = 400,
-  code?: string,
-  details?: any
+  _status: number = 400,
+  _code?: string,
+  _details?: any
 ) {
   console.warn('createApiError is deprecated. Use AppError classes instead.')
   return createErrorResponse(new Error(message))

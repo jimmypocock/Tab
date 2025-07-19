@@ -15,6 +15,20 @@ const config: Config = {
   moduleNameMapper: {
     // Handle module aliases
     '^@/(.*)$': '<rootDir>/$1',
+    // Mock external modules
+    '^drizzle-orm$': '<rootDir>/__tests__/__mocks__/drizzle-orm.ts',
+    '^@supabase/supabase-js$': '<rootDir>/__tests__/__mocks__/@supabase/supabase-js.ts',
+    // Handle CSS modules
+    '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+    // Handle image imports
+    '\\.(jpg|jpeg|png|gif|webp|svg)$': '<rootDir>/__tests__/__mocks__/fileMock.js',
+  },
+  // Support for ESM
+  extensionsToTreatAsEsm: ['.ts', '.tsx'],
+  globals: {
+    'ts-jest': {
+      useESM: true,
+    },
   },
   testMatch: [
     '**/__tests__/**/*.(ts|tsx|js)',
@@ -23,11 +37,19 @@ const config: Config = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/.next/',
+    '/__tests__/test-env-setup.js',
+    '/__tests__/helpers/',
+    '/__tests__/__mocks__/',
     '/e2e/', // Exclude Playwright tests
+    '/__tests__/__mocks__/', // Exclude mock files from test discovery
+    '/__tests__/mocks/', // Exclude MSW mocks
+    '/__tests__/helpers/', // Exclude helper files
   ],
   transformIgnorePatterns: [
-    'node_modules/(?!(isows|@supabase)/)',
+    'node_modules/(?!(isows|@supabase|@tanstack|@headlessui|stripe|lucide-react|clsx|tailwind-merge|uncrypto|@upstash|msw|@bundled-es-modules)/)',
   ],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node', 'mjs'],
+  resolver: undefined, // Use Next.js resolver
   collectCoverageFrom: [
     'app/**/*.{js,jsx,ts,tsx}',
     'lib/**/*.{js,jsx,ts,tsx}',

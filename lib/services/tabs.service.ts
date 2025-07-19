@@ -52,6 +52,10 @@ export class TabsService {
           metadata: data.metadata || null,
         }).returning()
 
+        if (!newTab) {
+          throw new Error('Failed to create tab')
+        }
+
         // Create line items
         if (lineItemsData.length > 0) {
           const insertedItems = await tx.insert(lineItems).values(
@@ -155,6 +159,10 @@ export class TabsService {
           )
         )
         .returning()
+
+      if (!updatedTab) {
+        throw new DatabaseError('Failed to update tab')
+      }
 
       // Fetch complete updated tab
       const completeTab = await this.getTab(updatedTab.id, merchantId)

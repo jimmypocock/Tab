@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Copy, Mail } from 'lucide-react'
 
-export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -26,8 +26,8 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
 
 export function SendInvoiceButton({ tabId }: { tabId: string }) {
   const handleSendInvoice = () => {
-    // TODO: Implement invoice sending
-    alert('Invoice sending not yet implemented')
+    // TODO: Implement invoice sending for tab: ${tabId}
+    alert(`Invoice sending not yet implemented for tab: ${tabId}`)
   }
 
   return (

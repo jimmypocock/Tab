@@ -5,7 +5,7 @@ import { Home, FileText, CreditCard, Settings, LogOut } from 'lucide-react'
 
 async function signOut() {
   'use server'
-  const supabase = createClient()
+  const supabase = await createClient()
   await supabase.auth.signOut()
   redirect('/login')
 }
@@ -15,7 +15,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   

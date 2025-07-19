@@ -116,7 +116,7 @@ export default function SettingsPage() {
                   </h3>
                   <div className="mt-2 text-sm text-yellow-700">
                     <p className="mb-2">
-                      Make sure to copy your API key now. You won't be able to see it again!
+                      Make sure to copy your API key now. You won&apos;t be able to see it again!
                     </p>
                     <div className="flex items-center space-x-2">
                       <code className="flex-1 bg-yellow-100 px-2 py-1 rounded text-xs font-mono">

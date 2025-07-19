@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client'
 import { lineItems, tabs } from '@/lib/db/schema'
 import { validateApiKey, createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
 import { createLineItemSchema } from '@/lib/api/validation'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 export async function POST(request: NextRequest) {
   // Validate API key
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   const validation = createLineItemSchema.safeParse(body)
   if (!validation.success) {
-    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.errors)
+    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.issues)
   }
 
   const data = validation.data

@@ -3,7 +3,7 @@ import { DollarSign, FileText, Clock, CheckCircle } from 'lucide-react'
 import { getDashboardStats, getRecentTabs } from '@/lib/services/dashboard'
 
 export default async function DashboardPage() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user } } = await supabase.auth.getUser()
   

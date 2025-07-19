@@ -2,6 +2,44 @@
 
 ## High Priority 🔴
 
+### UI Testing & Component Development
+- [ ] **Create Missing React Components**
+  - TabsList component (referenced in existing test)
+  - Payment form components
+  - Dashboard layout components
+  - UI components library (buttons, inputs, modals, etc.)
+  - Navigation components
+
+- [ ] **Component Testing Infrastructure**
+  - Fix Jest configuration for ESM modules
+  - Set up Supabase mocking for components
+  - Configure Stripe Elements testing
+  - Add React Testing Library custom render utilities
+  - Set up MSW (Mock Service Worker) for API mocking
+
+- [ ] **Comprehensive Component Test Suite**
+  - Payment flow components
+  - Dashboard components (stats, charts, tables)
+  - Form components with validation
+  - Modal and dialog components
+  - Authentication components
+  - Error boundary components
+
+- [ ] **E2E Test Implementation**
+  - Fix Playwright test configuration
+  - Set up test database seeding
+  - Configure Stripe test mode webhooks
+  - Add authentication flow tests
+  - Test payment flows end-to-end
+  - Mobile responsive testing
+
+- [ ] **Visual Regression Testing**
+  - Set up Playwright visual testing
+  - Create component snapshots
+  - Add responsive design tests
+  - Set up CI/CD visual diff reports
+  - Cross-browser visual testing
+
 ### API & Backend
 - [ ] **Multi-Merchant Support**
   - Allow multiple merchants per user account
@@ -201,17 +239,22 @@
 
 ## Tech Debt 🧹
 
-- [ ] **Upgrade Dependencies**
-  - Review and update all npm packages
-  - Migrate to latest Next.js features
-  - Update Stripe SDK
-  - Supabase client updates
+- [x] **Upgrade Dependencies**
+  - ✅ Review and update all npm packages (Dependabot updates applied)
+  - ✅ Migrate to latest Next.js features (Next.js 15 compatibility)
+  - ✅ Update Stripe SDK (v3.7.0)
+  - ✅ Supabase client updates
+  - ✅ Zod v4 compatibility fixes
+  - ✅ TypeScript strict mode compliance
 
 - [ ] **Test Coverage**
-  - Increase unit test coverage to 90%
-  - Add more integration tests
-  - Implement contract testing
-  - Load testing scenarios
+  - ✅ Core unit tests passing (validation, utils, errors, integration)
+  - [ ] Increase unit test coverage to 90%
+  - [ ] Add more integration tests
+  - [ ] Implement contract testing
+  - [ ] Load testing scenarios
+  - [ ] Component test coverage
+  - [ ] E2E test coverage
 
 - [ ] **Code Quality**
   - Set up SonarQube
@@ -236,3 +279,11 @@
 - [x] Basic webhook implementation
 - [x] Payment processing integration
 - [x] Row-level security policies
+- [x] **Dependency Updates (July 2025)**
+  - Next.js 14 → 15.4.1 with full compatibility
+  - Zod 3.22.4 → 4.0.5 with breaking change fixes
+  - Updated all Stripe packages to latest versions
+  - Updated Node types, date-fns, lucide-react, and more
+  - Fixed all TypeScript compilation issues
+  - ESLint configuration and code quality fixes
+  - All builds passing with no warnings

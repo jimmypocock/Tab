@@ -54,7 +54,7 @@ describe('Validation Schemas', () => {
       const result = createTabSchema.safeParse(invalidData)
       expect(result.success).toBe(false)
       if (!result.success) {
-        expect(result.error.errors[0].message).toContain('At least one line item is required')
+        expect(result.error.issues[0].message).toContain('At least one line item is required')
       }
     })
 

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
-import { tabs, payments } from '@/lib/db/schema'
+import { payments } from '@/lib/db/schema'
 import { validateApiKey, createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
 import { createPaymentSchema } from '@/lib/api/validation'
 import { createPaymentIntent } from '@/lib/stripe/client'
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const validation = createPaymentSchema.safeParse(body)
   if (!validation.success) {
-    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.errors)
+    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.issues)
   }
 
   const data = validation.data

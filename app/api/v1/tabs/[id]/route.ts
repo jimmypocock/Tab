@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
 import { tabs } from '@/lib/db/schema'
-import { validateApiKey, createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
-import { updateTabSchema } from '@/lib/api/validation'
+import { withApiAuth, parseJsonBody, ApiContext } from '@/lib/api/middleware'
+import { updateTabSchema, validateInput } from '@/lib/api/validation'
 import { eq, and } from 'drizzle-orm'
 import { 
   parseFieldSelection, 
@@ -10,170 +10,227 @@ import {
   DefaultFields,
   validateFieldSelection 
 } from '@/lib/api/field-selection'
+import { 
+  createSuccessResponse,
+  ApiResponseBuilder 
+} from '@/lib/api/response'
+import { 
+  NotFoundError,
+  ValidationError,
+  ConflictError,
+  DatabaseError
+} from '@/lib/errors'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  // Validate API key
-  const { valid, context, error } = await validateApiKey(request)
-  if (!valid) {
-    return createApiError((error as Error)?.message || 'Unauthorized', 401)
-  }
-
-  // Parse field selection
-  const { searchParams } = new URL(request.url)
-  const requestedFields = parseFieldSelection(searchParams.get('fields'))
-  const selectedFields = requestedFields || DefaultFields.tabWithItems
+  // Await params in Next.js 15
+  const { id } = await params
   
-  // Validate field selection if provided
-  if (requestedFields) {
-    const validation = validateFieldSelection(requestedFields, DefaultFields.tabWithItems)
-    if (!validation.valid) {
-      return createApiError(
-        `Invalid fields: ${validation.invalidFields?.join(', ')}`,
-        400,
-        'INVALID_FIELDS'
-      )
+  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+    // Parse field selection
+    const { searchParams } = new URL(req.url)
+    const requestedFields = parseFieldSelection(searchParams.get('fields'))
+    const selectedFields = requestedFields || DefaultFields.tabWithItems
+    
+    // Validate field selection if provided
+    if (requestedFields) {
+      const validation = validateFieldSelection(requestedFields, DefaultFields.tabWithItems)
+      if (!validation.valid) {
+        throw new ValidationError(
+          `Invalid fields: ${validation.invalidFields?.join(', ')}`,
+          [{ message: 'Invalid field selection', path: ['fields'] }]
+        )
+      }
     }
-  }
 
-  try {
-    // Fetch tab with all related data
-    const tab = await db.query.tabs.findFirst({
-      where: (tabs, { eq, and }) => 
-        and(
-          eq(tabs.id, params.id),
-          eq(tabs.merchantId, context!.merchantId)
-        ),
-      with: {
-        lineItems: true,
-        payments: {
-          orderBy: (payments, { desc }) => [desc(payments.createdAt)],
+    try {
+      // Fetch tab with all related data
+      const tab = await db.query.tabs.findFirst({
+        where: (tabs, { eq, and }) => 
+          and(
+            eq(tabs.id, id),
+            eq(tabs.merchantId, context.merchantId)
+          ),
+        with: {
+          lineItems: true,
+          payments: {
+            orderBy: (payments, { desc }) => [desc(payments.createdAt)],
+          },
+          invoices: {
+            orderBy: (invoices, { desc }) => [desc(invoices.createdAt)],
+          },
         },
-        invoices: {
-          orderBy: (invoices, { desc }) => [desc(invoices.createdAt)],
-        },
-      },
-    })
+      })
 
-    if (!tab) {
-      return createApiError('Tab not found', 404, 'NOT_FOUND')
+      if (!tab) {
+        throw new NotFoundError('Tab')
+      }
+
+      // Calculate balance
+      const balance = parseFloat(tab.totalAmount) - parseFloat(tab.paidAmount)
+      const enrichedTab = {
+        ...tab,
+        balance: balance.toFixed(2),
+      }
+
+      // Apply field selection
+      const projectedTab = applyFieldSelection(enrichedTab, selectedFields)
+
+      logger.debug('Tab fetched', {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+        fieldsRequested: requestedFields ? Array.from(requestedFields) : 'default',
+      })
+
+      return new ApiResponseBuilder()
+        .setData(projectedTab)
+        .build()
+        
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error
+      }
+      logger.error('Failed to fetch tab', error as Error, {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+      })
+      throw new DatabaseError('Failed to fetch tab', error)
     }
-
-    // Calculate balance
-    const balance = parseFloat(tab.totalAmount) - parseFloat(tab.paidAmount)
-    const enrichedTab = {
-      ...tab,
-      balance: balance.toFixed(2),
-    }
-
-    // Apply field selection
-    const projectedTab = applyFieldSelection(enrichedTab, selectedFields)
-
-    return createApiResponse(projectedTab)
-  } catch (error) {
-    console.error('Error fetching tab:', error)
-    return createApiError('Failed to fetch tab', 500, 'INTERNAL_ERROR')
-  }
+  })
 }
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  // Validate API key
-  const { valid, context, error } = await validateApiKey(request)
-  if (!valid) {
-    return createApiError((error as Error)?.message || 'Unauthorized', 401)
-  }
-
-  // Parse and validate request body
-  const body = await parseJsonBody(request)
-  if (!body) {
-    return createApiError('Invalid JSON body', 400)
-  }
-
-  const validation = updateTabSchema.safeParse(body)
-  if (!validation.success) {
-    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.errors)
-  }
-
-  const data = validation.data
-
-  try {
-    // Update tab
-    const [updatedTab] = await db
-      .update(tabs)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(tabs.id, params.id),
-          eq(tabs.merchantId, context!.merchantId)
-        )
-      )
-      .returning()
-
-    if (!updatedTab) {
-      return createApiError('Tab not found', 404, 'NOT_FOUND')
+  // Await params in Next.js 15
+  const { id } = await params
+  
+  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+    // Parse and validate request body
+    const body = await parseJsonBody(req)
+    
+    const validation = validateInput(updateTabSchema, body)
+    if (!validation.success) {
+      throw new ValidationError('Invalid request data', validation.error.issues)
     }
 
-    // Fetch complete updated tab
-    const completeTab = await db.query.tabs.findFirst({
-      where: (tabs, { eq }) => eq(tabs.id, updatedTab.id),
-      with: {
-        lineItems: true,
-        payments: {
-          orderBy: (payments, { desc }) => [desc(payments.createdAt)],
-        },
-      },
-    })
+    const data = validation.data
 
-    return createApiResponse(completeTab)
-  } catch (error) {
-    console.error('Error updating tab:', error)
-    return createApiError('Failed to update tab', 500, 'INTERNAL_ERROR')
-  }
+    try {
+      // Update tab
+      const [updatedTab] = await db
+        .update(tabs)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(tabs.id, id),
+            eq(tabs.merchantId, context.merchantId)
+          )
+        )
+        .returning()
+
+      if (!updatedTab) {
+        throw new NotFoundError('Tab')
+      }
+
+      // Fetch complete updated tab
+      const completeTab = await db.query.tabs.findFirst({
+        where: (tabs, { eq }) => eq(tabs.id, updatedTab.id),
+        with: {
+          lineItems: true,
+          payments: {
+            orderBy: (payments, { desc }) => [desc(payments.createdAt)],
+          },
+        },
+      })
+
+      logger.info('Tab updated', {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+        updates: Object.keys(data),
+      })
+
+      return new ApiResponseBuilder()
+        .setData(completeTab)
+        .build()
+        
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error
+      }
+      logger.error('Failed to update tab', error as Error, {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+      })
+      throw new DatabaseError('Failed to update tab', error)
+    }
+  })
 }
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  // Validate API key
-  const { valid, context, error } = await validateApiKey(request)
-  if (!valid) {
-    return createApiError((error as Error)?.message || 'Unauthorized', 401)
-  }
+  // Await params in Next.js 15
+  const { id } = await params
+  
+  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+    try {
+      // Check if tab exists and belongs to merchant
+      const tab = await db.query.tabs.findFirst({
+        where: (tabs, { eq, and }) => 
+          and(
+            eq(tabs.id, id),
+            eq(tabs.merchantId, context.merchantId)
+          ),
+      })
 
-  try {
-    // Check if tab exists and belongs to merchant
-    const tab = await db.query.tabs.findFirst({
-      where: (tabs, { eq, and }) => 
-        and(
-          eq(tabs.id, params.id),
-          eq(tabs.merchantId, context!.merchantId)
-        ),
-    })
+      if (!tab) {
+        throw new NotFoundError('Tab')
+      }
 
-    if (!tab) {
-      return createApiError('Tab not found', 404, 'NOT_FOUND')
+      // Don't allow deletion of tabs with payments
+      if (parseFloat(tab.paidAmount) > 0) {
+        throw new ConflictError('Cannot delete tab with payments')
+      }
+
+      // Delete tab (line items will cascade)
+      await db.delete(tabs).where(eq(tabs.id, id))
+
+      logger.info('Tab deleted', {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+      })
+
+      return createSuccessResponse({ success: true })
+      
+    } catch (error) {
+      if (error instanceof NotFoundError || error instanceof ConflictError) {
+        throw error
+      }
+      logger.error('Failed to delete tab', error as Error, {
+        tabId: id,
+        merchantId: context.merchantId,
+        requestId: context.requestId,
+      })
+      throw new DatabaseError('Failed to delete tab', error)
     }
+  })
+}
 
-    // Don't allow deletion of tabs with payments
-    if (parseFloat(tab.paidAmount) > 0) {
-      return createApiError('Cannot delete tab with payments', 400, 'HAS_PAYMENTS')
-    }
-
-    // Delete tab (line items will cascade)
-    await db.delete(tabs).where(eq(tabs.id, params.id))
-
-    return createApiResponse({ success: true }, 200)
-  } catch (error) {
-    console.error('Error deleting tab:', error)
-    return createApiError('Failed to delete tab', 500, 'INTERNAL_ERROR')
-  }
+// Handle OPTIONS for CORS
+export async function OPTIONS(_request: NextRequest) {
+  return createSuccessResponse({}, undefined, 204)
 }

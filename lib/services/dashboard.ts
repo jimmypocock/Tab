@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { withRedisCache, CacheKeys, CacheTags, invalidateCache } from '@/lib/redis/client'
+import { withRedisCache, CacheTags, invalidateCache } from '@/lib/redis/client'
 import { logger } from '@/lib/logger'
 
 export interface DashboardStats {
@@ -27,7 +27,7 @@ export async function getDashboardStats(merchantId: string): Promise<DashboardSt
   return withRedisCache(
     `dashboard:stats:${merchantId}`,
     async () => {
-      const supabase = createClient()
+      const supabase = await createClient()
       
       // Single optimized query to get all stats
       const { data: stats, error } = await supabase.rpc('get_merchant_stats', {
@@ -86,7 +86,7 @@ export async function getRecentTabs(merchantId: string, limit: number = 5): Prom
   return withRedisCache(
     `dashboard:recent-tabs:${merchantId}:${limit}`,
     async () => {
-      const supabase = createClient()
+      const supabase = await createClient()
       
       // Optimized query with aggregated line item count
       const { data: tabs, error } = await supabase

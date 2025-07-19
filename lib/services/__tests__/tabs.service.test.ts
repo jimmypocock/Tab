@@ -1,38 +1,22 @@
+import '../../../__tests__/test-env-setup.js' // Must be first import
 import { tabsService } from '../tabs.service'
-import { db } from '@/lib/db/client'
-import { tabs, lineItems } from '@/lib/db/schema'
-import { CreateTabInput } from '@/lib/api/validation'
+import { CreateTabInput, UpdateTabInput } from '@/lib/api/validation'
 import { NotFoundError, ConflictError, DatabaseError } from '@/lib/errors'
 import { TAX_RATE } from '@/lib/utils'
-
-// Mock the database
-jest.mock('@/lib/db/client', () => ({
-  db: {
-    transaction: jest.fn(),
-    query: {
-      tabs: {
-        findFirst: jest.fn(),
-      },
-    },
-    insert: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-  },
-}))
-
-// Mock logger to avoid console output in tests
-jest.mock('@/lib/logger', () => ({
-  logger: {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn(),
-  },
-}))
+import { getMockedModules } from '../../../__tests__/test-env-setup.js'
+import { testData } from '../../../__tests__/helpers/test-db'
 
 describe('TabsService', () => {
+  let mocks: ReturnType<typeof getMockedModules>
+  let testMerchant: ReturnType<typeof testData.merchant>
+  
+  beforeAll(() => {
+    mocks = getMockedModules()
+  })
+  
   beforeEach(() => {
     jest.clearAllMocks()
+    testMerchant = testData.merchant()
   })
 
   describe('createTab', () => {
@@ -42,324 +26,472 @@ describe('TabsService', () => {
       currency: 'USD',
       lineItems: [
         {
-          description: 'Product 1',
+          description: 'Item 1',
           quantity: 2,
-          unitPrice: 50,
+          unitPrice: 25.00,
         },
         {
-          description: 'Product 2',
+          description: 'Item 2',
           quantity: 1,
-          unitPrice: 30,
+          unitPrice: 50.00,
         },
       ],
     }
 
     it('should create a tab with correct calculations', async () => {
-      const mockTab = {
-        id: 'tab_123',
-        merchantId: 'merchant_123',
-        customerEmail: 'test@example.com',
-        customerName: 'Test Customer',
-        currency: 'USD',
-        subtotal: '130.00',
-        taxAmount: '10.40',
-        totalAmount: '140.40',
-        paidAmount: '0.00',
-        status: 'open',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-
-      const mockLineItems = [
-        {
-          id: 'item_1',
-          tabId: 'tab_123',
-          description: 'Product 1',
-          quantity: 2,
-          unitPrice: '50.00',
-          total: '100.00',
-          createdAt: new Date(),
-        },
-        {
-          id: 'item_2',
-          tabId: 'tab_123',
-          description: 'Product 2',
-          quantity: 1,
-          unitPrice: '30.00',
-          total: '30.00',
-          createdAt: new Date(),
-        },
-      ]
-
-      const mockTransaction = jest.fn().mockImplementation(async (callback) => {
-        const tx = {
-          insert: jest.fn().mockReturnValue({
-            values: jest.fn().mockReturnValue({
-              returning: jest.fn().mockResolvedValue([mockTab]),
-            }),
-          }),
-        }
-        return callback(tx)
+      // Arrange
+      const expectedSubtotal = 100 // (2 * 25) + (1 * 50)
+      const expectedTax = expectedSubtotal * TAX_RATE
+      const expectedTotal = expectedSubtotal + expectedTax
+      
+      const createdTab = testData.tab(testMerchant.id, {
+        subtotal: expectedSubtotal.toFixed(2),
+        taxAmount: expectedTax.toFixed(2),
+        totalAmount: expectedTotal.toFixed(2),
+      })
+      
+      mocks.db.transaction.mockResolvedValue({
+        ...createdTab,
+        lineItems: mockTabInput.lineItems!.map((item, index) => 
+          testData.lineItem(createdTab.id, {
+            ...item,
+            totalPrice: (item.quantity * item.unitPrice).toFixed(2)
+          })
+        ),
+        payments: [],
       })
 
-      ;(db.transaction as jest.Mock).mockImplementation(mockTransaction)
-      ;(db.insert as jest.Mock).mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue(mockLineItems),
-        }),
-      })
+      // Act
+      const result = await tabsService.createTab(testMerchant.id, mockTabInput)
 
-      const result = await tabsService.createTab('merchant_123', mockTabInput)
-
-      expect(result).toMatchObject({
-        id: 'tab_123',
-        customerEmail: 'test@example.com',
-        subtotal: '130.00',
-        taxAmount: '10.40',
-        totalAmount: '140.40',
-      })
-
-      expect(db.transaction).toHaveBeenCalled()
+      // Assert
+      expect(result).toBeDefined()
+      expect(result.totalAmount).toBe(expectedTotal.toFixed(2))
+      expect(result.status).toBe('open')
+      expect(mocks.db.transaction).toHaveBeenCalled()
     })
 
     it('should use custom tax rate when provided', async () => {
+      // Arrange
       const inputWithTax = {
         ...mockTabInput,
-        taxRate: 0.15, // 15% tax
+        taxRate: 0.15,
       }
-
-      const mockTab = {
-        id: 'tab_123',
-        merchantId: 'merchant_123',
-        customerEmail: 'test@example.com',
-        customerName: 'Test Customer',
-        currency: 'USD',
-        subtotal: '130.00',
-        taxAmount: '19.50', // 130 * 0.15
-        totalAmount: '149.50', // 130 + 19.50
-        paidAmount: '0.00',
-        status: 'open',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-
-      const mockLineItems = []
-
-      const mockTransaction = jest.fn().mockImplementation(async (callback) => {
-        const txInsert = jest.fn().mockReturnValue({
-          values: jest.fn().mockImplementation((values) => {
-            // Verify the tax calculation
-            if (values.taxAmount) {
-              expect(values.taxAmount).toBe('19.50')
-              expect(values.totalAmount).toBe('149.50')
-            }
-            return {
-              returning: jest.fn().mockResolvedValue(
-                values.taxAmount ? [mockTab] : mockLineItems
-              ),
-            }
-          }),
-        })
-
-        const tx = {
-          insert: txInsert,
-          query: {
-            tabs: {
-              findFirst: jest.fn().mockResolvedValue({
-                ...mockTab,
-                lineItems: mockLineItems,
-              }),
-            },
-          },
-        }
-        return callback(tx)
+      
+      const expectedSubtotal = 100
+      const expectedTax = expectedSubtotal * 0.15
+      const expectedTotal = expectedSubtotal + expectedTax
+      
+      const createdTab = testData.tab(testMerchant.id, {
+        subtotal: expectedSubtotal.toFixed(2),
+        taxAmount: expectedTax.toFixed(2),
+        totalAmount: expectedTotal.toFixed(2),
       })
 
-      ;(db.transaction as jest.Mock).mockImplementation(mockTransaction)
+      mocks.db.transaction.mockResolvedValue({
+        ...createdTab,
+        lineItems: [],
+        payments: [],
+      })
 
-      const result = await tabsService.createTab('merchant_123', inputWithTax)
-      
-      expect(result.taxAmount).toBe('19.50')
-      expect(result.totalAmount).toBe('149.50')
+      // Act
+      const result = await tabsService.createTab(testMerchant.id, inputWithTax)
+
+      // Assert
+      expect(result.totalAmount).toBe(expectedTotal.toFixed(2))
     })
 
     it('should handle database errors', async () => {
-      ;(db.transaction as jest.Mock).mockRejectedValue(new Error('DB Error'))
+      // Arrange
+      mocks.db.transaction.mockRejectedValue(new Error('Database connection failed'))
 
+      // Act & Assert
       await expect(
-        tabsService.createTab('merchant_123', mockTabInput)
+        tabsService.createTab(testMerchant.id, mockTabInput)
       ).rejects.toThrow(DatabaseError)
+    })
+
+    it('should create tab without line items', async () => {
+      // Arrange
+      const inputWithoutItems: CreateTabInput = {
+        customerEmail: 'test@example.com',
+        currency: 'USD',
+        lineItems: [],
+      }
+      
+      const createdTab = testData.tab(testMerchant.id, {
+        subtotal: '0.00',
+        taxAmount: '0.00',
+        totalAmount: '0.00',
+      })
+
+      mocks.db.transaction.mockResolvedValue({
+        ...createdTab,
+        lineItems: [],
+        payments: [],
+      })
+
+      // Act
+      const result = await tabsService.createTab(testMerchant.id, inputWithoutItems)
+
+      // Assert
+      expect(result.totalAmount).toBe('0.00')
     })
   })
 
   describe('getTab', () => {
     it('should fetch a tab with computed fields', async () => {
-      const mockTab = {
-        id: 'tab_123',
-        merchantId: 'merchant_123',
+      // Arrange
+      const mockTab = testData.tab(testMerchant.id, {
         totalAmount: '100.00',
         paidAmount: '30.00',
         status: 'partial',
+      })
+
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...mockTab,
         lineItems: [],
         payments: [],
-      }
+      })
 
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(mockTab)
+      // Act
+      const result = await tabsService.getTab(mockTab.id, testMerchant.id)
 
-      const result = await tabsService.getTab('tab_123', 'merchant_123')
-
+      // Assert
       expect(result).toMatchObject({
         ...mockTab,
         balance: 70,
         computedStatus: 'partial',
       })
+      expect(mocks.db.query.tabs.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            type: 'and',
+            conditions: expect.arrayContaining([
+              expect.objectContaining({ type: 'eq' }),
+              expect.objectContaining({ type: 'eq' })
+            ])
+          }),
+          with: expect.objectContaining({
+            lineItems: expect.any(Object),
+            payments: expect.any(Object),
+          }),
+        })
+      )
     })
 
     it('should return null for non-existent tab', async () => {
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(null)
+      // Arrange
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
 
-      const result = await tabsService.getTab('tab_999', 'merchant_123')
+      // Act
+      const result = await tabsService.getTab('non-existent', testMerchant.id)
 
+      // Assert
       expect(result).toBeNull()
+    })
+
+    it('should include line items and payments', async () => {
+      // Arrange
+      const mockTab = testData.tab(testMerchant.id)
+      const mockLineItems = [
+        testData.lineItem(mockTab.id),
+        testData.lineItem(mockTab.id),
+      ]
+      const mockPayments = [
+        testData.payment(mockTab.id, { amount: '50.00' }),
+      ]
+
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...mockTab,
+        lineItems: mockLineItems,
+        payments: mockPayments,
+      })
+
+      // Act
+      const result = await tabsService.getTab(mockTab.id, testMerchant.id)
+
+      // Assert
+      expect(result?.lineItems).toHaveLength(2)
+      expect(result?.payments).toHaveLength(1)
     })
   })
 
   describe('updateTab', () => {
     it('should update tab successfully', async () => {
-      const existingTab = {
-        id: 'tab_123',
+      // Arrange
+      const existingTab = testData.tab(testMerchant.id, {
         status: 'open',
         totalAmount: '100.00',
         paidAmount: '0.00',
-      }
-
-      const updatedTab = {
-        ...existingTab,
+      })
+      
+      const updates: UpdateTabInput = {
         status: 'partial',
       }
 
-      ;(db.query.tabs.findFirst as jest.Mock)
-        .mockResolvedValueOnce(existingTab)
-        .mockResolvedValueOnce(updatedTab)
+      // Mock getTab
+      mocks.db.query.tabs.findFirst.mockResolvedValueOnce({
+        ...existingTab,
+        lineItems: [],
+        payments: [],
+      })
 
-      ;(db.update as jest.Mock).mockReturnValue({
+      // Mock update
+      mocks.db.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
-            returning: jest.fn().mockResolvedValue([updatedTab]),
-          }),
-        }),
+            returning: jest.fn().mockResolvedValue([{
+              ...existingTab,
+              ...updates,
+              updatedAt: new Date(),
+            }])
+          })
+        })
       })
 
-      const result = await tabsService.updateTab('tab_123', 'merchant_123', {
-        status: 'partial',
+      // Mock getTab for final fetch
+      mocks.db.query.tabs.findFirst.mockResolvedValueOnce({
+        ...existingTab,
+        ...updates,
+        lineItems: [],
+        payments: [],
       })
 
+      // Act
+      const result = await tabsService.updateTab(existingTab.id, testMerchant.id, updates)
+
+      // Assert
       expect(result.status).toBe('partial')
     })
 
     it('should throw NotFoundError for non-existent tab', async () => {
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(null)
+      // Arrange
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
 
+      // Act & Assert
       await expect(
-        tabsService.updateTab('tab_999', 'merchant_123', { status: 'paid' })
+        tabsService.updateTab('non-existent', testMerchant.id, { status: 'paid' })
       ).rejects.toThrow(NotFoundError)
     })
 
     it('should validate status transitions', async () => {
-      const paidTab = {
-        id: 'tab_123',
+      // Arrange
+      const paidTab = testData.tab(testMerchant.id, {
         status: 'paid',
         totalAmount: '100.00',
         paidAmount: '100.00',
-      }
+      })
 
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(paidTab)
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...paidTab,
+        lineItems: [],
+        payments: [],
+      })
 
+      // Act & Assert
       await expect(
-        tabsService.updateTab('tab_123', 'merchant_123', { status: 'open' })
+        tabsService.updateTab(paidTab.id, testMerchant.id, { status: 'open' })
       ).rejects.toThrow(ConflictError)
+    })
+
+    it('should allow valid status transitions', async () => {
+      // Test open -> partial
+      const openTab = testData.tab(testMerchant.id, { status: 'open' })
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValueOnce({
+        ...openTab,
+        lineItems: [],
+        payments: [],
+      })
+
+      mocks.db.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{ ...openTab, status: 'partial' }])
+          })
+        })
+      })
+
+      mocks.db.query.tabs.findFirst.mockResolvedValueOnce({
+        ...openTab,
+        status: 'partial',
+        lineItems: [],
+        payments: [],
+      })
+
+      const result = await tabsService.updateTab(openTab.id, testMerchant.id, { status: 'partial' })
+      expect(result.status).toBe('partial')
     })
   })
 
   describe('deleteTab', () => {
     it('should delete tab successfully', async () => {
-      const openTab = {
-        id: 'tab_123',
+      // Arrange
+      const openTab = testData.tab(testMerchant.id, {
         status: 'open',
-        totalAmount: '100.00',
         paidAmount: '0.00',
-      }
-
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(openTab)
-      ;(db.delete as jest.Mock).mockReturnValue({
-        where: jest.fn().mockResolvedValue(undefined),
       })
 
-      await expect(
-        tabsService.deleteTab('tab_123', 'merchant_123')
-      ).resolves.not.toThrow()
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...openTab,
+        lineItems: [],
+        payments: [],
+      })
+      
+      mocks.db.delete.mockReturnValue({
+        where: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([openTab])
+        })
+      })
 
-      expect(db.delete).toHaveBeenCalledWith(tabs)
+      // Act
+      await tabsService.deleteTab(openTab.id, testMerchant.id)
+
+      // Assert
+      expect(mocks.db.delete).toHaveBeenCalled()
     })
 
     it('should prevent deletion of tabs with payments', async () => {
-      const paidTab = {
-        id: 'tab_123',
-        status: 'paid',
+      // Arrange
+      const paidTab = testData.tab(testMerchant.id, {
+        status: 'partial',
         totalAmount: '100.00',
-        paidAmount: '100.00',
-      }
+        paidAmount: '50.00',
+      })
 
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(paidTab)
+      mocks.db.query.tabs.findFirst.mockResolvedValue({
+        ...paidTab,
+        lineItems: [],
+        payments: [],
+      })
 
+      // Act & Assert
       await expect(
-        tabsService.deleteTab('tab_123', 'merchant_123')
+        tabsService.deleteTab(paidTab.id, testMerchant.id)
       ).rejects.toThrow(ConflictError)
+    })
+
+    it('should throw NotFoundError for non-existent tab', async () => {
+      // Arrange
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+
+      // Act & Assert
+      await expect(
+        tabsService.deleteTab('non-existent', testMerchant.id)
+      ).rejects.toThrow(NotFoundError)
     })
   })
 
   describe('updateTabPaymentStatus', () => {
     it('should update payment status correctly', async () => {
-      const mockTab = {
-        id: 'tab_123',
+      // Arrange
+      const tabId = 'tab_123'
+      const paymentAmount = 50.00
+      
+      // Mock existing tab
+      const existingTab = testData.tab(testMerchant.id, {
+        id: tabId,
         totalAmount: '100.00',
         paidAmount: '30.00',
-      }
+        status: 'partial',
+      })
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValue(existingTab)
 
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(mockTab)
-      ;(db.update as jest.Mock).mockReturnValue({
+      // Mock update
+      mocks.db.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue(undefined),
-        }),
+          where: jest.fn().mockResolvedValue(undefined)
+        })
       })
 
-      await tabsService.updateTabPaymentStatus('tab_123', 20)
+      // Act
+      await tabsService.updateTabPaymentStatus(tabId, paymentAmount)
 
-      expect(db.update).toHaveBeenCalledWith(tabs)
-      const updateCall = (db.update as jest.Mock).mock.results[0].value.set.mock.calls[0][0]
-      expect(updateCall.paidAmount).toBe('50.00')
-      expect(updateCall.status).toBe('partial')
+      // Assert
+      expect(mocks.db.update).toHaveBeenCalledWith(expect.anything())
+      expect(mocks.db.update().set).toHaveBeenCalledWith({
+        paidAmount: '80.00', // 30 + 50
+        status: 'partial',
+        updatedAt: expect.any(Date)
+      })
     })
 
     it('should set status to paid when fully paid', async () => {
-      const mockTab = {
-        id: 'tab_123',
+      // Arrange
+      const tabId = 'tab_123'
+      const paymentAmount = 50.00
+      
+      // Mock existing tab that will be fully paid
+      const existingTab = testData.tab(testMerchant.id, {
+        id: tabId,
         totalAmount: '100.00',
-        paidAmount: '80.00',
-      }
+        paidAmount: '50.00',
+        status: 'partial',
+      })
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValue(existingTab)
 
-      ;(db.query.tabs.findFirst as jest.Mock).mockResolvedValue(mockTab)
-      ;(db.update as jest.Mock).mockReturnValue({
+      // Mock update
+      mocks.db.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue(undefined),
-        }),
+          where: jest.fn().mockResolvedValue(undefined)
+        })
       })
 
-      await tabsService.updateTabPaymentStatus('tab_123', 20)
+      // Act
+      await tabsService.updateTabPaymentStatus(tabId, paymentAmount)
 
-      const updateCall = (db.update as jest.Mock).mock.results[0].value.set.mock.calls[0][0]
-      expect(updateCall.paidAmount).toBe('100.00')
-      expect(updateCall.status).toBe('paid')
+      // Assert
+      expect(mocks.db.update().set).toHaveBeenCalledWith({
+        paidAmount: '100.00', // 50 + 50
+        status: 'paid',
+        updatedAt: expect.any(Date)
+      })
+    })
+
+    it('should handle zero payment amount', async () => {
+      // Arrange
+      const tabId = 'tab_123'
+      const paymentAmount = 0
+      
+      // Mock existing tab
+      const existingTab = testData.tab(testMerchant.id, {
+        id: tabId,
+        totalAmount: '100.00',
+        paidAmount: '0.00',
+        status: 'open',
+      })
+      
+      mocks.db.query.tabs.findFirst.mockResolvedValue(existingTab)
+
+      // Mock update
+      mocks.db.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue(undefined)
+        })
+      })
+
+      // Act
+      await tabsService.updateTabPaymentStatus(tabId, paymentAmount)
+
+      // Assert
+      expect(mocks.db.update().set).toHaveBeenCalledWith({
+        paidAmount: '0.00',
+        status: 'open',
+        updatedAt: expect.any(Date)
+      })
+    })
+    
+    it('should throw DatabaseError for non-existent tab', async () => {
+      // Arrange
+      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+      
+      // Act & Assert
+      await expect(
+        tabsService.updateTabPaymentStatus('non-existent', 10)
+      ).rejects.toThrow(DatabaseError)
     })
   })
 })

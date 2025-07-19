@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   const validation = createPaymentIntentSchema.safeParse(body)
   if (!validation.success) {
-    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.errors)
+    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.issues)
   }
 
   const data = validation.data

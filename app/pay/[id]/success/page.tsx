@@ -1,23 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useEffect, useState, useCallback } from 'react'
+import { useParams } from 'next/navigation'
 import { CheckCircle, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function PaymentSuccessPage() {
   const params = useParams()
-  const searchParams = useSearchParams()
-  const sessionId = searchParams.get('session_id')
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<any>(null)
 
-  useEffect(() => {
-    // Fetch the updated tab to show current status
-    fetchTab()
-  }, [params.id])
-
-  const fetchTab = async () => {
+  const fetchTab = useCallback(async () => {
     try {
       const response = await fetch(`/api/v1/public/tabs/${params.id}`)
       if (response.ok) {
@@ -29,7 +22,12 @@ export default function PaymentSuccessPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.id])
+
+  useEffect(() => {
+    // Fetch the updated tab to show current status
+    fetchTab()
+  }, [fetchTab])
 
   if (loading) {
     return (

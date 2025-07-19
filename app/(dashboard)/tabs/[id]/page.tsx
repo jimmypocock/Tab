@@ -4,8 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { CopyButton, SendInvoiceButton } from './client-components'
 
-export default async function TabDetailsPage({ params }: { params: { id: string } }) {
-  const supabase = createClient()
+export default async function TabDetailsPage({ params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createClient()
+  
+  // Await params in Next.js 15
+  const { id } = await params
   
   const { data: { user } } = await supabase.auth.getUser()
   
@@ -19,7 +22,7 @@ export default async function TabDetailsPage({ params }: { params: { id: string 
       invoices (*),
       merchant:merchants (*)
     `)
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('merchant_id', user!.id)
     .single()
 

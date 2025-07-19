@@ -11,13 +11,16 @@ import { logger } from '@/lib/logger'
 import { calculateTabBalance } from '@/lib/utils'
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Await params in Next.js 15
+  const { id } = await params
+  
   try {
     // Fetch tab with merchant info (no auth required for public payment page)
     const result = await db.query.tabs.findFirst({
-      where: eq(tabs.id, params.id),
+      where: eq(tabs.id, id),
       with: {
         lineItems: {
           orderBy: (lineItems, { asc }) => [asc(lineItems.createdAt)],
@@ -68,7 +71,7 @@ export async function GET(
     }
 
     logger.debug('Public tab fetched', {
-      tabId: params.id,
+      tabId: id,
       status: result.status,
     })
 
@@ -84,7 +87,7 @@ export async function GET(
     }
     
     logger.error('Error fetching public tab', error as Error, {
-      tabId: params.id,
+      tabId: id,
     })
     
     throw new DatabaseError('Failed to fetch tab', error)

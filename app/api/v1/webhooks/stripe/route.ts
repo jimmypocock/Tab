@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { headers } from 'next/headers'
 import Stripe from 'stripe'
 import { db } from '@/lib/db/client'
 import { payments, tabs } from '@/lib/db/schema'
@@ -13,7 +12,7 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
-  const sig = headers().get('stripe-signature')!
+  const sig = request.headers.get('stripe-signature')!
 
   let event: Stripe.Event
 
@@ -76,6 +75,10 @@ export async function POST(request: NextRequest) {
             },
           })
           .returning()
+        
+        if (!payment) {
+          throw new Error('Failed to create payment record')
+        }
         
         console.log('Payment record created:', payment.id)
         
