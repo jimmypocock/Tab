@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client'
 import { tabs, lineItems, Tab, LineItem } from '@/lib/db/schema'
 import { CreateTabInput, UpdateTabInput } from '@/lib/api/validation'
-import { calculateTabBalance, getTabStatus, TAX_RATE } from '@/lib/utils'
+import { calculateTabBalance, getTabStatus, TAX_RATE } from '@/lib/utils/index'
 import { DatabaseError, NotFoundError, ConflictError } from '@/lib/errors'
 import { eq, and } from 'drizzle-orm'
 import { logger } from '@/lib/logger'

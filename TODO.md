@@ -2,6 +2,84 @@
 
 ## High Priority 🔴
 
+### Payment Processor Architecture - Merchant-Owned Accounts
+- [ ] **Implement Multi-Processor Support Architecture**
+  - Design database schema for storing encrypted processor credentials per merchant
+  - Create processor abstraction layer/interface for multiple payment providers
+  - Implement secure credential storage with encryption at rest
+  - Add processor type enum (stripe, square, paypal, etc.)
+
+- [ ] **Stripe Connect Alternative Implementation**
+  - Remove hardcoded Stripe API keys from environment variables
+  - Create merchant processor settings page in dashboard
+  - Implement Stripe account connection flow (OAuth or API key input)
+  - Store encrypted Stripe credentials per merchant in database
+  - Update payment processing to use merchant's Stripe account
+  - Implement webhook routing to merchant-specific endpoints
+
+- [ ] **Payment Processor Abstraction Layer**
+  - Create IPaymentProcessor interface with standard methods:
+    - createPaymentIntent()
+    - createCheckoutSession()
+    - handleWebhook()
+    - refund()
+    - getPaymentStatus()
+  - Implement StripeProcessor class
+  - Create ProcessorFactory to instantiate correct processor
+  - Update all payment endpoints to use abstraction layer
+
+- [ ] **Merchant Processor Configuration UI**
+  - Add "Payment Processors" section to merchant settings
+  - Create processor connection wizard
+  - Display connection status and test mode indicators
+  - Add ability to disconnect/reconnect processors
+  - Implement processor credential validation
+  - Add test payment functionality
+
+- [ ] **Security & Compliance**
+  - Implement secure credential encryption using AES-256
+  - Add audit logging for processor configuration changes
+  - Ensure PCI compliance for handling processor credentials
+  - Implement credential rotation mechanism
+  - Add two-factor authentication for processor changes
+
+- [ ] **Database Schema Updates**
+  ```sql
+  -- merchant_processors table
+  CREATE TABLE merchant_processors (
+    id UUID PRIMARY KEY,
+    merchant_id UUID REFERENCES merchants(id),
+    processor_type TEXT NOT NULL, -- 'stripe', 'square', 'paypal', etc.
+    is_active BOOLEAN DEFAULT true,
+    is_test_mode BOOLEAN DEFAULT true,
+    encrypted_credentials JSONB NOT NULL, -- Encrypted API keys/tokens
+    webhook_secret TEXT, -- Encrypted
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+  ```
+
+- [ ] **Migration Strategy**
+  - Create migration plan for existing Stripe integration
+  - Maintain backward compatibility during transition
+  - Provide clear upgrade path for existing merchants
+  - Update documentation for new architecture
+
+- [ ] **Future Payment Processor Support**
+  - Square: Research API and implement SquareProcessor
+  - PayPal: Implement PayPalProcessor with Braintree SDK
+  - Authorize.net: Add support for traditional gateways
+  - Regional processors: Add framework for country-specific processors
+
+- [ ] **Implementation Notes & Considerations**
+  - **Phase 1**: Implement with Stripe only, but with abstraction layer ready
+  - **Phase 2**: Add Square and PayPal support
+  - **Phase 3**: Open framework for community-contributed processors
+  - **Testing**: Each processor needs test credentials/sandbox mode
+  - **Documentation**: Processor-specific setup guides needed
+  - **Support**: Consider processor-specific error handling and debugging
+  - **Compliance**: Different processors have different compliance requirements
+
 ### UI Testing & Component Development
 - [ ] **Create Missing React Components**
   - TabsList component (referenced in existing test)
@@ -46,6 +124,7 @@
   - Merchant switching in dashboard
   - Separate API keys per merchant
   - Merchant-specific settings and branding
+  - Each merchant has own payment processor connections
 
 - [ ] **Simplify API Key Strategy for MVP**
   - Consider removing test/live distinction initially
@@ -61,6 +140,7 @@
   - Prevent duplicate charges
   - Add idempotency key support for POST requests
   - Store and validate keys in Redis
+  - Ensure idempotency works across different payment processors
 
 - [ ] **Add Pagination Metadata**
   - Return total count, has_next, has_previous
@@ -137,12 +217,16 @@
   - Response time graphs
   - Error rate monitoring
   - Top endpoints by usage
+  - Payment processor success rates
+  - Processor-specific analytics
 
 - [ ] **Webhook Management UI**
   - Add/edit webhook endpoints
   - View webhook history
   - Retry failed webhooks
   - Test webhook delivery
+  - Configure processor-specific webhooks
+  - Webhook secret rotation per processor
 
 - [ ] **Invoice Builder UI**
   - Drag-and-drop invoice designer
@@ -153,6 +237,15 @@
 ## Low Priority 🟢
 
 ### Advanced Features
+- [ ] **Platform Revenue Model (Future)**
+  - Transaction fee collection options:
+    - Percentage-based platform fee
+    - Fixed fee per transaction
+    - Subscription-based pricing
+  - Revenue sharing with payment processors
+  - Platform billing and invoicing
+  - Merchant payout management
+
 - [ ] **GraphQL API**
   - GraphQL endpoint
   - Schema introspection
@@ -197,6 +290,13 @@
   - Magento extension
 
 ### Infrastructure
+- [ ] **Multi-Processor Webhook Infrastructure**
+  - Dynamic webhook endpoint routing based on processor
+  - Webhook signature verification per processor type
+  - Webhook event normalization across processors
+  - Failed webhook retry queue per merchant
+  - Webhook event logging and debugging tools
+
 - [ ] **GitHub Actions Deployment Pipeline**
   - Automated deployment to Vercel/Railway
   - Environment-specific deployments (staging/production)

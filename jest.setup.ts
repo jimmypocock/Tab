@@ -183,7 +183,7 @@ if (typeof BroadcastChannel === 'undefined') {
       this.name = name
     }
     
-    postMessage(message: any): void {
+    postMessage(_message: any): void {
       // Mock implementation
     }
     
@@ -191,15 +191,15 @@ if (typeof BroadcastChannel === 'undefined') {
       // Mock implementation
     }
     
-    addEventListener(type: string, listener: any): void {
+    addEventListener(_type: string, _listener: any): void {
       // Mock implementation
     }
     
-    removeEventListener(type: string, listener: any): void {
+    removeEventListener(_type: string, _listener: any): void {
       // Mock implementation
     }
     
-    dispatchEvent(event: Event): boolean {
+    dispatchEvent(_event: Event): boolean {
       return true
     }
   } as any

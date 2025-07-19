@@ -35,6 +35,7 @@ export default async function DashboardLayout({
     { name: 'Tabs', href: '/tabs', icon: FileText },
     { name: 'Invoices', href: '/invoices', icon: CreditCard },
     { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Payment Processors', href: '/settings/processors', icon: CreditCard },
   ]
 
   return (

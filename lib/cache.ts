@@ -1,7 +1,7 @@
 // Simple cache utility for Redis caching
 export const withRedisCache = async <T>(
-  key: string,
-  ttl: number,
+  _key: string,
+  _ttl: number,
   fn: () => Promise<T>
 ): Promise<T> => {
   // In production, this would check Redis first

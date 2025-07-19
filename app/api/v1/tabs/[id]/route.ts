@@ -29,9 +29,9 @@ export async function GET(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
     // Parse field selection
-    const { searchParams } = new URL(req.url)
+    const { searchParams } = new URL(_req.url)
     const requestedFields = parseFieldSelection(searchParams.get('fields'))
     const selectedFields = requestedFields || DefaultFields.tabWithItems
     
@@ -111,9 +111,9 @@ export async function PATCH(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
     // Parse and validate request body
-    const body = await parseJsonBody(req)
+    const body = await parseJsonBody(_req)
     
     const validation = validateInput(updateTabSchema, body)
     if (!validation.success) {
@@ -185,7 +185,7 @@ export async function DELETE(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
     try {
       // Check if tab exists and belongs to merchant
       const tab = await db.query.tabs.findFirst({

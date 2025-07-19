@@ -18,7 +18,7 @@ import {
   calculateTabBalance,
   getTabStatus,
   PAGINATION_MAX_LIMIT 
-} from '@/lib/utils'
+} from '@/lib/utils/index'
 import { eq, and, gte, lte, like } from 'drizzle-orm'
 import { countRows } from '@/lib/db/queries'
 import { 

@@ -72,10 +72,7 @@ export async function getDashboardStats(merchantId: string): Promise<DashboardSt
         pending_revenue: 0,
       }
     },
-    {
-      ttl: 60, // Cache for 1 minute
-      tags: [CacheTags.merchant(merchantId)],
-    }
+    60 // Cache for 1 minute
   )
 }
 
@@ -122,10 +119,7 @@ export async function getRecentTabs(merchantId: string, limit: number = 5): Prom
         lineItemCount: Array.isArray(tab.line_items) ? tab.line_items.length : 0,
       })) || []
     },
-    {
-      ttl: 30, // Cache for 30 seconds
-      tags: [CacheTags.merchant(merchantId)],
-    }
+    30 // Cache for 30 seconds
   )
 }
 
@@ -133,11 +127,7 @@ export async function getRecentTabs(merchantId: string, limit: number = 5): Prom
  * Invalidate dashboard cache when data changes
  */
 export async function invalidateDashboardCache(merchantId: string) {
-  await invalidateCache({
-    keys: [
-      `dashboard:stats:${merchantId}`,
-      `dashboard:recent-tabs:${merchantId}:5`,
-    ],
-    tags: [CacheTags.merchant(merchantId)],
-  })
+  // In production, this would invalidate multiple keys
+  // For now, just invalidate by merchant tag pattern
+  await invalidateCache(CacheTags.merchant(merchantId))
 }

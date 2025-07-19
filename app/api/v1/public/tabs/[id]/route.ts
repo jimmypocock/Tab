@@ -8,7 +8,7 @@ import {
 import { CacheConfigs } from '@/lib/api/cache'
 import { NotFoundError, DatabaseError } from '@/lib/errors'
 import { logger } from '@/lib/logger'
-import { calculateTabBalance } from '@/lib/utils'
+import { calculateTabBalance } from '@/lib/utils/index'
 
 export async function GET(
   _request: NextRequest,

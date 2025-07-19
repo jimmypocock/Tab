@@ -79,10 +79,11 @@ export const updateLineItemSchema = z.object({
 export const createPaymentSchema = z.object({
   tabId: uuidSchema,
   amount: positiveNumberSchema,
-  currency: currencySchema,
-  paymentMethodId: z.string().min(1), // Stripe payment method ID
+  currency: currencySchema.optional(),
+  paymentMethodId: z.string().min(1).optional(), // Payment method ID (processor-specific)
+  processorType: z.enum(['stripe', 'square', 'paypal', 'authorize_net']).optional(),
   metadata: metadataSchema,
-  returnUrl: z.string().url().optional(), // For 3D Secure
+  returnUrl: z.string().url().optional(), // For 3D Secure or redirects
 })
 
 export const createPaymentIntentSchema = z.object({

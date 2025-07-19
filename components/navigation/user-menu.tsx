@@ -5,7 +5,7 @@ import { Menu, Transition } from '@headlessui/react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface UserMenuItem {
+export interface UserMenuItem {
   label: string
   onClick: () => void
   icon?: React.ReactNode

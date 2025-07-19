@@ -65,10 +65,7 @@ export async function validateApiKey(
           },
         })
       },
-      {
-        ttl: 300, // Cache for 5 minutes
-        tags: [`apikey:${keyPrefix}`],
-      }
+      300 // Cache for 5 minutes
     )
     
     if (!apiKeyRecord) {
@@ -115,14 +112,10 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; retryAfter?: number }> {
   // Try Redis rate limiting first
   try {
-    const result = await checkRedisRateLimit(identifier, {
-      requests: limit,
-      window: `${Math.floor(windowMs / 1000)} s`,
-    })
+    const allowed = await checkRedisRateLimit(identifier, limit, windowMs)
     
-    if (!result.success) {
-      const retryAfter = Math.ceil((result.reset.getTime() - Date.now()) / 1000)
-      return { allowed: false, retryAfter }
+    if (!allowed) {
+      return { allowed: false, retryAfter: Math.ceil(windowMs / 1000) }
     }
     
     return { allowed: true }

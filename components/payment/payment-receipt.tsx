@@ -1,7 +1,6 @@
 'use client'
 
 import React from 'react'
-import { PaymentAmountDisplay } from './payment-amount-display'
 import type { PaymentStatus } from './payment-status-badge'
 
 interface LineItem {

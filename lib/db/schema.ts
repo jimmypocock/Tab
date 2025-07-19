@@ -1,5 +1,8 @@
-import { pgTable, uuid, text, timestamp, decimal, integer, boolean, json } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, decimal, integer, boolean, json, pgEnum, jsonb } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
+
+// Enums
+export const processorTypeEnum = pgEnum('processor_type', ['stripe', 'square', 'paypal', 'authorize_net'])
 
 export const merchants = pgTable('merchants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -12,6 +15,7 @@ export const merchants = pgTable('merchants', {
 export const merchantsRelations = relations(merchants, ({ many }) => ({
   apiKeys: many(apiKeys),
   tabs: many(tabs),
+  processors: many(merchantProcessors),
 }))
 
 export const apiKeys = pgTable('api_keys', {
@@ -77,9 +81,30 @@ export const lineItemsRelations = relations(lineItems, ({ one }) => ({
   }),
 }))
 
+export const merchantProcessors = pgTable('merchant_processors', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  merchantId: uuid('merchant_id').notNull().references(() => merchants.id, { onDelete: 'cascade' }),
+  processorType: text('processor_type').notNull(), // 'stripe', 'square', 'paypal', 'authorize_net'
+  isActive: boolean('is_active').default(true).notNull(),
+  isTestMode: boolean('is_test_mode').default(true).notNull(),
+  encryptedCredentials: jsonb('encrypted_credentials').notNull(),
+  webhookSecret: text('webhook_secret'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+export const merchantProcessorsRelations = relations(merchantProcessors, ({ one, many }) => ({
+  merchant: one(merchants, {
+    fields: [merchantProcessors.merchantId],
+    references: [merchants.id],
+  }),
+  payments: many(payments),
+}))
+
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   tabId: uuid('tab_id').notNull().references(() => tabs.id),
+  processorId: uuid('processor_id').references(() => merchantProcessors.id),
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   currency: text('currency').notNull().default('USD'),
   status: text('status').notNull(), // pending, processing, succeeded, failed
@@ -94,6 +119,10 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   tab: one(tabs, {
     fields: [payments.tabId],
     references: [tabs.id],
+  }),
+  processor: one(merchantProcessors, {
+    fields: [payments.processorId],
+    references: [merchantProcessors.id],
   }),
 }))
 
@@ -133,3 +162,5 @@ export type Invoice = typeof invoices.$inferSelect
 export type NewInvoice = typeof invoices.$inferInsert
 export type ApiKey = typeof apiKeys.$inferSelect
 export type NewApiKey = typeof apiKeys.$inferInsert
+export type MerchantProcessor = typeof merchantProcessors.$inferSelect
+export type NewMerchantProcessor = typeof merchantProcessors.$inferInsert
