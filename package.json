@@ -73,7 +73,7 @@
     "jest": "^30.0.4",
     "jest-environment-jsdom": "^30.0.4",
     "msw": "^2.10.4",
-    "next-test-api-route-handler": "^4.0.16",
+    "next-test-api-route-handler": "^5.0.0",
     "node-fetch": "^2.7.0",
     "node-mocks-http": "^1.17.2",
     "postcss": "^8",
