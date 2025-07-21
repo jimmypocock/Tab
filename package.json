@@ -67,7 +67,7 @@
     "autoprefixer": "^10.0.1",
     "drizzle-kit": "^1.0.0-beta.1-c0277c0",
     "esbuild": "^0.25.6",
-    "eslint": "^8",
+    "eslint": "^9",
     "eslint-config-next": "14.0.4",
     "identity-obj-proxy": "^3.0.0",
     "jest": "^30.0.4",
