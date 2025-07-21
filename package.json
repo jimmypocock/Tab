@@ -68,7 +68,7 @@
     "drizzle-kit": "^1.0.0-beta.1-c0277c0",
     "esbuild": "^0.25.6",
     "eslint": "^8",
-    "eslint-config-next": "14.0.4",
+    "eslint-config-next": "15.4.2",
     "identity-obj-proxy": "^3.0.0",
     "jest": "^30.0.4",
     "jest-environment-jsdom": "^30.0.4",
