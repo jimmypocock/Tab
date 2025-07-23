@@ -4,6 +4,7 @@ import { payments } from '@/lib/db/schema'
 import { createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
 import { createPaymentIntent } from '@/lib/stripe/client'
 import { z } from 'zod'
+import { logger } from '@/lib/logger'
 
 const createPaymentIntentSchema = z.object({
   tabId: z.string().uuid(),
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
       clientSecret: paymentIntent.client_secret,
     })
   } catch (error) {
-    console.error('Error creating payment intent:', error)
+    logger.error('Error creating payment intent', { error, tabId: data.tabId, amount: data.amount })
     return createApiError('Failed to create payment', 500, 'INTERNAL_ERROR')
   }
 }

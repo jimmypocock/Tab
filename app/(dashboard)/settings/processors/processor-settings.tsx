@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button, Input, Badge, Card, Modal, Spinner } from '@/components/ui'
+import { useToast } from '@/lib/toast/toast-context'
 import { 
   ProcessorType, 
   stripeCredentialsSchema,
@@ -22,6 +23,7 @@ import {
   Zap
 } from 'lucide-react'
 import { API_ROUTES, getWebhookUrl } from '@/lib/config/routes'
+import { WebhookStatus } from '@/components/settings/webhook-status'
 
 interface ProcessorSettingsProps {
   userId: string
@@ -87,12 +89,13 @@ const processorConfig = {
 }
 
 export default function ProcessorSettings({ userId: _userId }: ProcessorSettingsProps) {
+  const { showToast } = useToast()
   const [processors, setProcessors] = useState<MerchantProcessor[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedProcessor, setSelectedProcessor] = useState<ProcessorType | null>(null)
-  const [testMode, setTestMode] = useState(true)
+  // Mode is automatically determined from the API keys
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null)
@@ -156,7 +159,6 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
         body: JSON.stringify({
           processorType: selectedProcessor,
           credentials: validatedCredentials,
-          isTestMode: testMode,
         }),
       })
 
@@ -280,8 +282,17 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
       await navigator.clipboard.writeText(url)
       setCopiedWebhook(processorType)
       setTimeout(() => setCopiedWebhook(null), 2000)
+      showToast({
+        type: 'success',
+        title: 'Webhook URL copied',
+        description: 'The webhook URL has been copied to your clipboard'
+      })
     } catch (err) {
-      console.error('Failed to copy webhook URL:', err)
+      showToast({
+        type: 'error',
+        title: 'Failed to copy',
+        description: 'Could not copy the webhook URL to clipboard'
+      })
     }
   }
 
@@ -295,7 +306,7 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
             <Input
               label="Secret Key"
               type="password"
-              placeholder={testMode ? "sk_test_..." : "sk_live_..."}
+              placeholder="sk_test_... or sk_live_..."
               value={formData[ProcessorType.STRIPE].secretKey}
               onChange={(e) => setFormData({
                 ...formData,
@@ -308,7 +319,7 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
             />
             <Input
               label="Publishable Key"
-              placeholder={testMode ? "pk_test_..." : "pk_live_..."}
+              placeholder="pk_test_... or pk_live_..."
               value={formData[ProcessorType.STRIPE].publishableKey}
               onChange={(e) => setFormData({
                 ...formData,
@@ -320,6 +331,20 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
               required
             />
             <div className="space-y-3 mt-4">
+              {/* Security Badge */}
+              <div className="p-3 bg-green-50 border border-green-200 rounded">
+                <div className="flex items-start space-x-2">
+                  <Shield className="w-5 h-5 text-green-600 mt-0.5" />
+                  <div className="text-sm">
+                    <strong className="text-green-800">Bank-Level Security</strong>
+                    <p className="text-green-700 mt-1">
+                      Your payment credentials are encrypted with AES-256-GCM encryption and stored securely. 
+                      We never store raw credentials and all sensitive data is encrypted at rest.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
               <div className="text-sm text-gray-500">
                 Find your API keys in your{' '}
                 <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
@@ -327,18 +352,8 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
                 </a>
               </div>
               
-              {testMode && (
-                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
-                  <strong className="text-yellow-800">Test Mode:</strong> Use test API keys (starting with sk_test_ and pk_test_)
-                </div>
-              )}
-              
               <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm">
-                <strong className="text-blue-800">Webhook Configuration:</strong>
-                <p className="mt-1 text-blue-700">After adding this processor, configure webhooks in Stripe with this URL:</p>
-                <code className="block mt-2 p-2 bg-white rounded text-xs">
-                  {getWebhookUrl(ProcessorType.STRIPE)}
-                </code>
+                <strong className="text-blue-800">API Key Detection:</strong> The system automatically detects whether you&apos;re using test or live keys based on the key prefix (sk_test_/pk_test_ for test mode, sk_live_/pk_live_ for live mode).
               </div>
             </div>
           </>
@@ -481,34 +496,44 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
                       </Button>
                     </div>
                   </div>
-                </div>
-              
-              {processor.webhookSecret && (
-                <div className="mt-4 p-3 bg-gray-50 rounded">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <span className="text-sm font-medium text-gray-700">Webhook URL:</span>
-                      <div className="mt-1 flex items-center space-x-2">
-                        <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1 overflow-x-auto">
-                          {getWebhookUrl(processor.processorType)}
-                        </code>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => copyWebhookUrl(processor.processorType)}
-                          className="flex-shrink-0"
-                        >
-                          {copiedWebhook === processor.processorType ? (
-                            <><CheckCircle className="w-4 h-4 mr-1" /> Copied!</>
-                          ) : (
-                            <><Copy className="w-4 h-4 mr-1" /> Copy</>
-                          )}
-                        </Button>
+                  
+                  {/* Webhook Configuration */}
+                  {processor.webhookSecret && (
+                    <div className="mt-6 border-t pt-6">
+                      <WebhookStatus 
+                        processorId={processor.id} 
+                        processorType={config.label}
+                        onRefresh={() => fetchProcessors()}
+                      />
+                      
+                      {/* Show webhook URL only for manual configuration fallback */}
+                      <div className="mt-4 p-3 bg-gray-50 rounded">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <span className="text-xs font-medium text-gray-500">Manual Configuration (if needed):</span>
+                            <div className="mt-1 flex items-center space-x-2">
+                              <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1 overflow-x-auto">
+                                {getWebhookUrl(processor.processorType)}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => copyWebhookUrl(processor.processorType)}
+                                className="flex-shrink-0"
+                              >
+                                {copiedWebhook === processor.processorType ? (
+                                  <><CheckCircle className="w-4 h-4 mr-1" /> Copied!</>
+                                ) : (
+                                  <><Copy className="w-4 h-4 mr-1" /> Copy</>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
-              )}
               </Card>
             )
           })
@@ -528,7 +553,7 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
           resetForm()
         }}
       >
-        <div className="space-y-4">
+        <div className="p-6 space-y-4">
           <h2 className="text-lg font-semibold">Add Payment Processor</h2>
           {/* Processor Selection */}
           {!selectedProcessor ? (
@@ -576,28 +601,6 @@ export default function ProcessorSettings({ userId: _userId }: ProcessorSettings
                 ← Back to processors
               </button>
 
-              {/* Test/Live Mode Toggle */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <label className="text-sm font-medium">Mode</label>
-                <div className="flex items-center space-x-2">
-                  <button
-                    className={`px-3 py-1 text-sm rounded ${
-                      testMode ? 'bg-yellow-500 text-white' : 'bg-gray-200'
-                    }`}
-                    onClick={() => setTestMode(true)}
-                  >
-                    Test
-                  </button>
-                  <button
-                    className={`px-3 py-1 text-sm rounded ${
-                      !testMode ? 'bg-green-500 text-white' : 'bg-gray-200'
-                    }`}
-                    onClick={() => setTestMode(false)}
-                  >
-                    Live
-                  </button>
-                </div>
-              </div>
 
               {/* Processor-specific form */}
               {renderProcessorForm()}

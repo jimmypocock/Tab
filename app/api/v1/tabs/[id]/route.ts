@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
 import { tabs } from '@/lib/db/schema'
-import { withApiAuth, parseJsonBody, ApiContext } from '@/lib/api/middleware'
+import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
+import { parseJsonBody } from '@/lib/api/middleware'
 import { updateTabSchema, validateInput } from '@/lib/api/validation'
 import { eq, and } from 'drizzle-orm'
 import { 
@@ -29,7 +30,7 @@ export async function GET(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (_req: NextRequest, context: OrganizationContext) => {
     // Parse field selection
     const { searchParams } = new URL(_req.url)
     const requestedFields = parseFieldSelection(searchParams.get('fields'))
@@ -52,7 +53,7 @@ export async function GET(
         where: (tabs, { eq, and }) => 
           and(
             eq(tabs.id, id),
-            eq(tabs.merchantId, context.merchantId)
+            eq(tabs.organizationId, context.organizationId)
           ),
         with: {
           lineItems: true,
@@ -81,8 +82,7 @@ export async function GET(
 
       logger.debug('Tab fetched', {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
         fieldsRequested: requestedFields ? Array.from(requestedFields) : 'default',
       })
 
@@ -96,8 +96,7 @@ export async function GET(
       }
       logger.error('Failed to fetch tab', error as Error, {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to fetch tab', error)
     }
@@ -111,7 +110,7 @@ export async function PATCH(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (_req: NextRequest, context: OrganizationContext) => {
     // Parse and validate request body
     const body = await parseJsonBody(_req)
     
@@ -123,6 +122,24 @@ export async function PATCH(
     const data = validation.data
 
     try {
+      // First, fetch the existing tab to validate it can be updated
+      const existingTab = await db.query.tabs.findFirst({
+        where: (tabs, { eq, and }) => 
+          and(
+            eq(tabs.id, id),
+            eq(tabs.organizationId, context.organizationId)
+          ),
+      })
+
+      if (!existingTab) {
+        throw new NotFoundError('Tab')
+      }
+
+      // Don't allow updating paid tabs
+      if (existingTab.status === 'paid') {
+        throw new ValidationError('Cannot update a paid tab')
+      }
+
       // Update tab
       const [updatedTab] = await db
         .update(tabs)
@@ -133,7 +150,7 @@ export async function PATCH(
         .where(
           and(
             eq(tabs.id, id),
-            eq(tabs.merchantId, context.merchantId)
+            eq(tabs.organizationId, context.organizationId)
           )
         )
         .returning()
@@ -155,8 +172,7 @@ export async function PATCH(
 
       logger.info('Tab updated', {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
         updates: Object.keys(data),
       })
 
@@ -165,17 +181,24 @@ export async function PATCH(
         .build()
         
     } catch (error) {
-      if (error instanceof NotFoundError) {
+      if (error instanceof NotFoundError || error instanceof ValidationError) {
         throw error
       }
       logger.error('Failed to update tab', error as Error, {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to update tab', error)
     }
   })
+}
+
+// PUT handler - alias for PATCH for compatibility
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return PATCH(request, { params })
 }
 
 export async function DELETE(
@@ -185,14 +208,14 @@ export async function DELETE(
   // Await params in Next.js 15
   const { id } = await params
   
-  return withApiAuth(request, async (_req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (_req: NextRequest, context: OrganizationContext) => {
     try {
       // Check if tab exists and belongs to merchant
       const tab = await db.query.tabs.findFirst({
         where: (tabs, { eq, and }) => 
           and(
             eq(tabs.id, id),
-            eq(tabs.merchantId, context.merchantId)
+            eq(tabs.organizationId, context.organizationId)
           ),
       })
 
@@ -210,8 +233,7 @@ export async function DELETE(
 
       logger.info('Tab deleted', {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
 
       return createSuccessResponse({ success: true })
@@ -222,8 +244,7 @@ export async function DELETE(
       }
       logger.error('Failed to delete tab', error as Error, {
         tabId: id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to delete tab', error)
     }

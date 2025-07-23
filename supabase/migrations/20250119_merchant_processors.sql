@@ -22,27 +22,19 @@ ALTER TABLE merchant_processors ENABLE ROW LEVEL SECURITY;
 -- RLS Policies
 CREATE POLICY "Merchants can view own processors" ON merchant_processors
     FOR SELECT
-    USING (merchant_id IN (
-        SELECT id FROM merchants WHERE user_id = auth.uid()
-    ));
+    USING (merchant_id = auth.uid());
 
 CREATE POLICY "Merchants can create own processors" ON merchant_processors
     FOR INSERT
-    WITH CHECK (merchant_id IN (
-        SELECT id FROM merchants WHERE user_id = auth.uid()
-    ));
+    WITH CHECK (merchant_id = auth.uid());
 
 CREATE POLICY "Merchants can update own processors" ON merchant_processors
     FOR UPDATE
-    USING (merchant_id IN (
-        SELECT id FROM merchants WHERE user_id = auth.uid()
-    ));
+    USING (merchant_id = auth.uid());
 
 CREATE POLICY "Merchants can delete own processors" ON merchant_processors
     FOR DELETE
-    USING (merchant_id IN (
-        SELECT id FROM merchants WHERE user_id = auth.uid()
-    ));
+    USING (merchant_id = auth.uid());
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_merchant_processors_updated_at()
@@ -61,7 +53,7 @@ CREATE TRIGGER merchant_processors_updated_at
 
 -- Add processor_id to payments table to track which processor was used
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS processor_id UUID REFERENCES merchant_processors(id);
-CREATE INDEX idx_payments_processor_id ON payments(processor_id);
+CREATE INDEX IF NOT EXISTS idx_payments_merchant_processor_id ON payments(processor_id);
 
 -- Add processor_id to webhooks table (if exists) to track webhook source
 DO $$ 

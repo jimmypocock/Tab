@@ -7,10 +7,34 @@ export default async function DashboardPage() {
   
   const { data: { user } } = await supabase.auth.getUser()
   
+  if (!user) {
+    return null
+  }
+  
+  // Get user's current organization (for now, use the first active organization)
+  const { data: userOrganizations } = await supabase
+    .from('organization_users')
+    .select(`
+      organizations (id)
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .limit(1)
+  
+  const organizationId = userOrganizations?.[0]?.organizations?.id
+  
+  if (!organizationId) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-gray-500">No organization found. Please contact support.</p>
+      </div>
+    )
+  }
+  
   // Get stats and recent tabs in parallel with caching
   const [stats, recentTabs] = await Promise.all([
-    getDashboardStats(user!.id),
-    getRecentTabs(user!.id, 5),
+    getDashboardStats(organizationId),
+    getRecentTabs(organizationId, 5),
   ])
 
   const statCards = [

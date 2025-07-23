@@ -34,23 +34,9 @@ export default function RegisterPage() {
       if (authError) {
         setError(authError.message)
       } else if (authData.user) {
-        // Create merchant record
-        const { error: merchantError } = await supabase
-          .from('merchants')
-          .insert({
-            id: authData.user.id,
-            email,
-            business_name: businessName,
-          })
-
-        if (merchantError) {
-          setError('Failed to create merchant account')
-          console.error('Merchant creation error:', merchantError)
-        } else {
-          // Redirect to settings to create first API key
-          router.push('/settings?welcome=true')
-          router.refresh()
-        }
+        // Merchant record is created automatically by database trigger
+        // Redirect to a confirmation page
+        router.push('/confirm-email')
       }
     } catch (err) {
       setError('An unexpected error occurred')

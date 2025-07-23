@@ -1,10 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { createHash } from 'crypto'
 import { generateApiKey } from '@/lib/api/keys'
+import { OrganizationService } from '@/lib/services/organization.service'
 
 /**
- * Creates a merchant with an initial API key
- * This ensures every merchant has at least one API key for immediate use
+ * Creates an organization with an initial API key
+ * This ensures every organization has at least one API key for immediate use
+ * 
+ * @deprecated Function name is misleading - it creates organizations, not merchants
+ * TODO: Rename to setupOrganizationWithApiKey in next major version
  */
 export async function setupMerchantWithApiKey(
   userId: string,
@@ -14,19 +18,20 @@ export async function setupMerchantWithApiKey(
   const supabase = await createClient()
   
   try {
-    // Start a transaction-like operation
-    // First, create the merchant
-    const { error: merchantError } = await supabase
-      .from('merchants')
-      .insert({
-        id: userId,
-        email,
-        business_name: businessName,
-      })
+    // Create organization with user as owner
+    const organization = await OrganizationService.createOrganization({
+      name: businessName,
+      slug: businessName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-'),
+      type: 'business',
+      isMerchant: true,
+      isCorporate: false,
+      primaryEmail: email,
+      settings: {},
+      createdBy: userId,
+    })
     
-    if (merchantError) {
-      console.error('Failed to create merchant:', merchantError)
-      return { success: false, error: 'Failed to create merchant account' }
+    if (!organization) {
+      return { success: false, error: 'Failed to create organization' }
     }
     
     // Generate a unique API key
@@ -66,25 +71,24 @@ export async function setupMerchantWithApiKey(
     const { error: keyError } = await supabase
       .from('api_keys')
       .insert({
-        merchant_id: userId,
+        organization_id: organization.id,
         key_hash: keyHash!,
         key_prefix: keyPrefix,
         name: 'Default API Key',
+        scope: 'full',
         is_active: true,
       })
     
     if (keyError) {
       console.error('Failed to create API key:', keyError)
-      // Clean up merchant if API key creation fails
-      await supabase.from('merchants').delete().eq('id', userId)
+      // Clean up organization if API key creation fails
+      await supabase.from('organizations').delete().eq('id', organization.id)
       return { success: false, error: 'Failed to create API key' }
     }
     
     return { success: true, apiKey: apiKey! }
   } catch (error) {
     console.error('Unexpected error in setupMerchantWithApiKey:', error)
-    // Attempt cleanup
-    await supabase.from('merchants').delete().eq('id', userId)
     return { success: false, error: 'An unexpected error occurred' }
   }
 }

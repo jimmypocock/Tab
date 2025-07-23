@@ -28,10 +28,13 @@ export const paginationSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 })
 
-// Tab schemas
+// Tab schemas with flexible customer targeting
 export const createTabSchema = z.object({
-  customerEmail: emailSchema,
+  // Customer targeting - either individual or organization
+  customerEmail: emailSchema.optional(),
   customerName: z.string().min(1).max(255).optional(),
+  customerOrganizationId: uuidSchema.optional(),
+  
   externalReference: z.string().max(255).optional(),
   currency: currencySchema,
   lineItems: z.array(z.object({
@@ -42,7 +45,16 @@ export const createTabSchema = z.object({
   })).min(1, 'At least one line item is required').max(100),
   metadata: metadataSchema,
   taxRate: z.number().min(0).max(1).optional(), // 0-100% as decimal
-})
+}).refine(
+  (data) => {
+    // Must specify either customerEmail (individual) or customerOrganizationId (organization)
+    return data.customerEmail || data.customerOrganizationId
+  },
+  {
+    message: 'Must specify either customerEmail (for individuals) or customerOrganizationId (for organizations)',
+    path: ['customerEmail']
+  }
+)
 
 export const updateTabSchema = z.object({
   status: z.enum(['open', 'partial', 'paid', 'void']).optional(),
@@ -54,6 +66,7 @@ export const updateTabSchema = z.object({
 export const tabQuerySchema = paginationSchema.extend({
   status: z.enum(['open', 'partial', 'paid', 'void']).optional(),
   customerEmail: emailSchema.optional(),
+  customerOrganizationId: uuidSchema.optional(),
   externalReference: z.string().optional(),
   createdAfter: z.string().datetime().optional(),
   createdBefore: z.string().datetime().optional(),

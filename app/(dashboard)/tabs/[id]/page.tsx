@@ -61,7 +61,11 @@ export default async function TabDetailsPage({ params }: { params: Promise<{ id:
               <ExternalLink className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
               View Payment Page
             </Link>
-            <SendInvoiceButton tabId={tab.id} />
+            <SendInvoiceButton 
+              tabId={tab.id} 
+              customerEmail={tab.customer_email}
+              customerName={tab.customer_name}
+            />
           </div>
         </div>
       </div>

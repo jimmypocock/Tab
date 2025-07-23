@@ -15,14 +15,13 @@ import { MerchantProcessorService } from '@/lib/services/merchant-processor.serv
 import { ProcessorType } from '@/lib/payment-processors/types'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { merchants } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { organizationUsers, organizations } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 
 // Schema for adding a processor
 const addProcessorSchema = z.object({
   processorType: z.enum(['stripe', 'square', 'paypal', 'authorize_net']),
   credentials: z.record(z.string(), z.any()),
-  isTestMode: z.boolean().default(true),
 })
 
 export async function GET(_request: NextRequest) {
@@ -35,17 +34,23 @@ export async function GET(_request: NextRequest) {
       throw new UnauthorizedError('Authentication required')
     }
 
-    // Get merchant
-    const merchant = await db.query.merchants.findFirst({
-      where: eq(merchants.id, user.id),
+    // Get user's organization (for now, use the first active organization)
+    const organizationData = await db.query.organizationUsers.findFirst({
+      where: and(
+        eq(organizationUsers.userId, user.id),
+        eq(organizationUsers.status, 'active')
+      ),
+      with: {
+        organization: true
+      }
     })
 
-    if (!merchant) {
-      throw new NotFoundError('Merchant account not found')
+    if (!organizationData?.organization) {
+      throw new NotFoundError('Organization not found')
     }
 
-    // Get all processors for the merchant
-    const processors = await MerchantProcessorService.getMerchantProcessors(merchant.id)
+    // Get all processors for the organization
+    const processors = await MerchantProcessorService.getMerchantProcessors(organizationData.organization.id)
 
     return new ApiResponseBuilder()
       .setData(processors)
@@ -67,13 +72,19 @@ export async function POST(request: NextRequest) {
       throw new UnauthorizedError('Authentication required')
     }
 
-    // Get merchant
-    const merchant = await db.query.merchants.findFirst({
-      where: eq(merchants.id, user.id),
+    // Get user's organization (for now, use the first active organization)
+    const organizationData = await db.query.organizationUsers.findFirst({
+      where: and(
+        eq(organizationUsers.userId, user.id),
+        eq(organizationUsers.status, 'active')
+      ),
+      with: {
+        organization: true
+      }
     })
 
-    if (!merchant) {
-      throw new NotFoundError('Merchant account not found')
+    if (!organizationData?.organization) {
+      throw new NotFoundError('Organization not found')
     }
 
     // Parse and validate request body
@@ -84,14 +95,13 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('Invalid request data', validation.error.issues)
     }
 
-    const { processorType, credentials, isTestMode } = validation.data
+    const { processorType, credentials } = validation.data
 
-    // Add the processor
+    // Add the processor (mode is auto-detected from credentials)
     const processor = await MerchantProcessorService.addProcessor(
-      merchant.id,
+      organizationData.organization.id,
       processorType as ProcessorType,
-      credentials,
-      isTestMode
+      credentials
     )
 
     // Get webhook URL for the processor

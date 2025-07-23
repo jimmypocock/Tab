@@ -4,6 +4,7 @@ import { lineItems, tabs } from '@/lib/db/schema'
 import { validateApiKey, createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
 import { createLineItemSchema } from '@/lib/api/validation'
 import { eq } from 'drizzle-orm'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   // Validate API key
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     return createApiResponse(lineItem, 201)
   } catch (error) {
-    console.error('Error creating line item:', error)
+    logger.error('Error creating line item', { error, tabId: data.tabId, merchantId: context!.merchantId })
     return createApiError('Failed to create line item', 500, 'INTERNAL_ERROR')
   }
 }

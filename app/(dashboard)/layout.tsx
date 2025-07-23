@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { Home, FileText, CreditCard, Settings, LogOut } from 'lucide-react'
+import { Home, FileText, CreditCard, Settings, LogOut, Users } from 'lucide-react'
+import { DashboardProviders } from './dashboard-providers'
+import { OrganizationSwitcher } from '@/components/dashboard/organization-switcher'
 
 async function signOut() {
   'use server'
@@ -23,25 +25,59 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // Get merchant data
-  const { data: merchant } = await supabase
-    .from('merchants')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  // Get user's organizations
+  const { data: userOrganizations } = await supabase
+    .from('organization_users')
+    .select(`
+      role,
+      status,
+      organizations (
+        id,
+        name,
+        slug,
+        is_merchant,
+        is_corporate
+      )
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+
+  // Check if user has any organizations
+  if (!userOrganizations || userOrganizations.length === 0) {
+    redirect('/settings/setup-organization')
+  }
+
+  // For now, just use the first organization
+  // In a production app, you might want to store user preference in database
+  // or implement a more sophisticated organization selection mechanism
+  const currentOrganizationData = userOrganizations[0]
+    
+  if (!currentOrganizationData?.organizations) {
+    redirect('/settings/setup-organization')
+  }
+  
+  const currentOrganization = currentOrganizationData.organizations
+  const userRole = currentOrganizationData.role
+  
+  // Extract organization list for the switcher
+  const organizations = userOrganizations
+    .map(org => org.organizations)
+    .filter(Boolean)
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Tabs', href: '/tabs', icon: FileText },
     { name: 'Invoices', href: '/invoices', icon: CreditCard },
     { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Team', href: '/settings/team', icon: Users },
     { name: 'Payment Processors', href: '/settings/processors', icon: CreditCard },
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg">
+    <DashboardProviders>
+      <div className="min-h-screen bg-gray-50">
+        {/* Sidebar */}
+        <div className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg">
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="flex h-16 items-center justify-center border-b">
@@ -67,10 +103,12 @@ export default async function DashboardLayout({
 
           {/* User info and sign out */}
           <div className="border-t p-4">
+            <OrganizationSwitcher
+              currentOrganization={currentOrganization}
+              organizations={organizations}
+              userRole={userRole}
+            />
             <div className="mb-3">
-              <p className="text-sm font-medium text-gray-900">
-                {merchant?.business_name || 'Business'}
-              </p>
               <p className="text-sm text-gray-500">{user.email}</p>
             </div>
             <form action={signOut}>
@@ -98,5 +136,6 @@ export default async function DashboardLayout({
         </main>
       </div>
     </div>
+    </DashboardProviders>
   )
 }

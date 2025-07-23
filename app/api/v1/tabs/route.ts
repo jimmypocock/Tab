@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
 import { tabs, lineItems } from '@/lib/db/schema'
-import { withApiAuth, parseJsonBody, ApiContext } from '@/lib/api/middleware'
+import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
+import { parseJsonBody } from '@/lib/api/middleware'
 import { createTabSchema, tabQuerySchema, validateInput } from '@/lib/api/validation'
 import { 
   createSuccessResponse,
@@ -13,6 +14,7 @@ import {
   DatabaseError
 } from '@/lib/errors'
 import { logger } from '@/lib/logger'
+import { CustomerTargetingService } from '@/lib/services/customer-targeting.service'
 import { 
   TAX_RATE, 
   calculateTabBalance,
@@ -29,7 +31,7 @@ import {
 } from '@/lib/api/field-selection'
 
 export async function POST(request: NextRequest) {
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
     // Parse request body
     const body = await parseJsonBody(req)
     
@@ -62,11 +64,23 @@ export async function POST(request: NextRequest) {
 
       // Create tab with line items in a transaction
       const result = await db.transaction(async (tx) => {
+        // Validate customer targeting before creating tab
+        const customerValidation = CustomerTargetingService.validateCustomerTargeting({
+          customerEmail: data.customerEmail,
+          customerName: data.customerName,
+          customerOrganizationId: data.customerOrganizationId,
+        })
+        
+        if (!customerValidation.isValid) {
+          throw new ValidationError(customerValidation.error!)
+        }
+        
         // Create the tab
         const [newTab] = await tx.insert(tabs).values({
-          merchantId: context.merchantId,
-          customerEmail: data.customerEmail,
+          organizationId: context.organizationId,
+          customerEmail: data.customerEmail || null,
           customerName: data.customerName || null,
+          customerOrganizationId: data.customerOrganizationId || null,
           externalReference: data.externalReference || null,
           currency: data.currency,
           subtotal: subtotal.toFixed(2),
@@ -93,12 +107,19 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        // Fetch the complete tab with line items
+        // Fetch the complete tab with line items and customer organization info
         const completeTab = await tx.query.tabs.findFirst({
           where: (tabs, { eq }) => eq(tabs.id, newTab.id),
           with: {
             lineItems: {
               orderBy: (lineItems, { asc }) => [asc(lineItems.createdAt)],
+            },
+            customerOrganization: {
+              columns: {
+                id: true,
+                name: true,
+                billingEmail: true,
+              }
             },
           },
         })
@@ -108,8 +129,7 @@ export async function POST(request: NextRequest) {
 
       logger.info('Tab created', {
         tabId: result?.id,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
         totalAmount: totalAmount.toFixed(2),
       })
 
@@ -123,16 +143,17 @@ export async function POST(request: NextRequest) {
         
     } catch (error) {
       logger.error('Failed to create tab', error as Error, {
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to create tab', error)
     }
+  }, {
+    requiredScope: 'merchant'
   })
 }
 
 export async function GET(request: NextRequest) {
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
     // Parse query parameters
     const { searchParams } = new URL(req.url)
     const queryParams = Object.fromEntries(searchParams.entries())
@@ -164,7 +185,7 @@ export async function GET(request: NextRequest) {
 
     try {
       // Build where conditions
-      const conditions = [eq(tabs.merchantId, context.merchantId)]
+      const conditions = [eq(tabs.organizationId, context.organizationId)]
       
       if (query.status) {
         conditions.push(eq(tabs.status, query.status))
@@ -172,6 +193,10 @@ export async function GET(request: NextRequest) {
       
       if (query.customerEmail) {
         conditions.push(eq(tabs.customerEmail, query.customerEmail))
+      }
+      
+      if (query.customerOrganizationId) {
+        conditions.push(eq(tabs.customerOrganizationId, query.customerOrganizationId))
       }
       
       if (query.externalReference) {
@@ -197,6 +222,13 @@ export async function GET(request: NextRequest) {
             payments: {
               where: (payments, { eq }) => eq(payments.status, 'succeeded'),
               orderBy: (payments, { desc }) => [desc(payments.createdAt)],
+            },
+            customerOrganization: {
+              columns: {
+                id: true,
+                name: true,
+                billingEmail: true,
+              }
             },
           },
           limit,
@@ -224,8 +256,7 @@ export async function GET(request: NextRequest) {
 
       logger.debug('Tabs fetched', {
         count: results.length,
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
         fieldsRequested: requestedFields ? Array.from(requestedFields) : 'default',
       })
 
@@ -237,11 +268,12 @@ export async function GET(request: NextRequest) {
         
     } catch (error) {
       logger.error('Failed to fetch tabs', error as Error, {
-        merchantId: context.merchantId,
-        requestId: context.requestId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to fetch tabs', error)
     }
+  }, {
+    requiredScope: 'merchant'
   })
 }
 

@@ -4,7 +4,7 @@
  */
 
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@/__tests__/helpers/test-utils'
 import '@testing-library/jest-dom'
 import ProcessorSettings from '@/app/(dashboard)/settings/processors/processor-settings'
 import { ProcessorType } from '@/lib/payment-processors/types'
@@ -63,6 +63,13 @@ const processorHandlers = [
   http.post('/api/v1/payments', async ({ request }) => {
     const body = await request.json() as any
     return HttpResponse.json({ data: { id: 'payment_test', ...body } })
+  }),
+  http.get('/api/v1/merchant/processors/:id/webhook-status', () => {
+    return HttpResponse.json({ 
+      configured: true,
+      lastWebhook: new Date().toISOString(),
+      status: 'active'
+    })
   })
 ]
 
@@ -160,7 +167,7 @@ describe('ProcessorSettings Component', () => {
       render(<ProcessorSettings userId="user_123" />)
       
       await waitFor(() => {
-        expect(screen.getByText('Webhook URL:')).toBeInTheDocument()
+        expect(screen.getByText('Manual Configuration (if needed):')).toBeInTheDocument()
         expect(screen.getByText(/api\/v1\/webhooks\/stripe/)).toBeInTheDocument()
       })
     })
@@ -259,19 +266,17 @@ describe('ProcessorSettings Component', () => {
       })
     })
 
-    it('should toggle between test and live mode', async () => {
+    it('should show correct placeholder for API keys', async () => {
       // Find and click the Stripe option
       const stripeCard = screen.getByText('Stripe').closest('.p-4')
       fireEvent.click(stripeCard!)
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText('sk_test_...')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('sk_test_... or sk_live_...')).toBeInTheDocument()
       })
-
-      const liveButton = screen.getByRole('button', { name: 'Live' })
-      fireEvent.click(liveButton)
-
-      expect(screen.getByPlaceholderText('sk_live_...')).toBeInTheDocument()
+      
+      // The test/live mode is automatically detected from the API key prefix
+      // No manual toggle exists in the component
     })
 
     it('should submit processor configuration', async () => {

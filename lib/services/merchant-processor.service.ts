@@ -12,15 +12,18 @@ import {
 } from '@/lib/payment-processors/types'
 import { NotFoundError, ValidationError, ConflictError, DatabaseError } from '@/lib/errors'
 import { logger } from '@/lib/logger'
+import { WebhookConfigService } from './webhook-config.service'
 
+// Note: This service still uses 'merchant' in its name for backward compatibility
+// but internally works with organizations
 export class MerchantProcessorService {
   /**
-   * Get all processors for a merchant
+   * Get all processors for an organization
    */
-  static async getMerchantProcessors(merchantId: string): Promise<MerchantProcessor[]> {
+  static async getMerchantProcessors(organizationId: string): Promise<MerchantProcessor[]> {
     try {
       const processors = await db.query.merchantProcessors.findMany({
-        where: eq(merchantProcessors.merchantId, merchantId),
+        where: eq(merchantProcessors.organizationId, organizationId),
         orderBy: (processors, { desc }) => [desc(processors.createdAt)],
       })
 
@@ -31,7 +34,7 @@ export class MerchantProcessorService {
         webhookSecret: p.webhookSecret ? 'CONFIGURED' : null,
       }))
     } catch (error) {
-      logger.error('Failed to get merchant processors', error as Error, { merchantId })
+      logger.error('Failed to get organization processors', error as Error, { organizationId })
       throw error
     }
   }
@@ -40,14 +43,14 @@ export class MerchantProcessorService {
    * Get a specific processor
    */
   static async getProcessor(
-    merchantId: string, 
+    organizationId: string, 
     processorType: ProcessorType,
     isTestMode: boolean = true
   ): Promise<MerchantProcessor | null> {
     try {
       const processor = await db.query.merchantProcessors.findFirst({
         where: and(
-          eq(merchantProcessors.merchantId, merchantId),
+          eq(merchantProcessors.organizationId, organizationId),
           eq(merchantProcessors.processorType, processorType),
           eq(merchantProcessors.isTestMode, isTestMode),
           eq(merchantProcessors.isActive, true)
@@ -63,7 +66,7 @@ export class MerchantProcessorService {
         webhookSecret: processor.webhookSecret ? 'CONFIGURED' : null,
       }
     } catch (error) {
-      logger.error('Failed to get processor', error as Error, { merchantId, processorType })
+      logger.error('Failed to get processor', error as Error, { organizationId, processorType })
       throw error
     }
   }
@@ -72,13 +75,13 @@ export class MerchantProcessorService {
    * Create a payment processor instance
    */
   static async createProcessorInstance(
-    merchantId: string,
+    organizationId: string,
     processorType: ProcessorType,
     isTestMode: boolean = true
   ): Promise<IPaymentProcessor> {
     const processor = await db.query.merchantProcessors.findFirst({
       where: and(
-        eq(merchantProcessors.merchantId, merchantId),
+        eq(merchantProcessors.organizationId, organizationId),
         eq(merchantProcessors.processorType, processorType),
         eq(merchantProcessors.isTestMode, isTestMode),
         eq(merchantProcessors.isActive, true)
@@ -108,7 +111,7 @@ export class MerchantProcessorService {
    * Add a new processor configuration
    */
   static async addProcessor(
-    merchantId: string,
+    organizationId: string,
     processorType: ProcessorType,
     credentials: any,
     isTestMode: boolean = true
@@ -122,9 +125,28 @@ export class MerchantProcessorService {
       // Validate credentials schema
       const schema = processorCredentialSchemas[processorType]
       const validatedCredentials = schema.parse(credentials)
+      
+      // Auto-detect test mode from credentials
+      let detectedTestMode = true // default to test mode
+      if (processorType === ProcessorType.STRIPE) {
+        // Check if secret key starts with sk_test_ or sk_live_
+        detectedTestMode = validatedCredentials.secretKey.startsWith('sk_test_')
+      } else if (processorType === ProcessorType.SQUARE) {
+        // Square uses environment field
+        detectedTestMode = validatedCredentials.environment !== 'production'
+      } else if (processorType === ProcessorType.PAYPAL) {
+        // PayPal test mode detection could be based on client ID pattern
+        // For now, default to test mode
+      } else if (processorType === ProcessorType.AUTHORIZE_NET) {
+        // Authorize.Net test mode detection could be based on endpoint
+        // For now, default to test mode
+      }
+
+      // Use detected test mode
+      isTestMode = detectedTestMode
 
       // Check if processor already exists
-      const existing = await this.getProcessor(merchantId, processorType, isTestMode)
+      const existing = await this.getProcessor(organizationId, processorType, isTestMode)
       if (existing) {
         throw new ConflictError('Processor configuration already exists')
       }
@@ -145,16 +167,24 @@ export class MerchantProcessorService {
 
       // Encrypt credentials
       const encryptedCredentials = EncryptionService.encrypt(validatedCredentials)
-      const webhookSecret = EncryptionService.generateWebhookSecret()
+      
+      // Automatically configure webhook
+      const webhookConfig = await WebhookConfigService.configureWebhook(
+        processorType,
+        validatedCredentials,
+        organizationId
+      )
 
-      // Save to database
+      // Save to database with webhook configuration
+      // For Stripe, we don't store webhook secret as it comes from environment variable
       const [newProcessor] = await db.insert(merchantProcessors).values({
-        merchantId,
+        organizationId,
         processorType,
         isTestMode,
         isActive: true,
         encryptedCredentials,
-        webhookSecret,
+        webhookSecret: processorType === 'stripe' ? null : webhookConfig.webhookSecret,
+        metadata: webhookConfig.webhookId ? { webhookId: webhookConfig.webhookId } : undefined,
       }).returning()
 
       if (!newProcessor) {
@@ -162,7 +192,7 @@ export class MerchantProcessorService {
       }
 
       logger.info('Processor configuration added', {
-        merchantId,
+        organizationId,
         processorType,
         processorId: newProcessor.id,
       })
@@ -174,7 +204,7 @@ export class MerchantProcessorService {
         webhookSecret: 'CONFIGURED',
       }
     } catch (error) {
-      logger.error('Failed to add processor', error as Error, { merchantId, processorType })
+      logger.error('Failed to add processor', error as Error, { organizationId, processorType })
       throw error
     }
   }
@@ -183,7 +213,7 @@ export class MerchantProcessorService {
    * Update processor configuration
    */
   static async updateProcessor(
-    merchantId: string,
+    organizationId: string,
     processorId: string,
     updates: {
       credentials?: any
@@ -195,7 +225,7 @@ export class MerchantProcessorService {
       const existing = await db.query.merchantProcessors.findFirst({
         where: and(
           eq(merchantProcessors.id, processorId),
-          eq(merchantProcessors.merchantId, merchantId)
+          eq(merchantProcessors.organizationId, organizationId)
         ),
       })
 
@@ -223,16 +253,13 @@ export class MerchantProcessorService {
         const isValid = await processor.validateCredentials()
         
         if (!isValid) {
-          throw new ProcessorConfigurationError(
-            'Invalid processor credentials', 
-            existing.processorType as ProcessorType
-          )
+          throw new ProcessorConfigurationError('Invalid processor credentials', existing.processorType as ProcessorType)
         }
 
         updateData.encryptedCredentials = EncryptionService.encrypt(validatedCredentials)
       }
 
-      // Handle active status update
+      // Handle isActive update
       if (updates.isActive !== undefined) {
         updateData.isActive = updates.isActive
       }
@@ -241,7 +268,10 @@ export class MerchantProcessorService {
       const [updated] = await db
         .update(merchantProcessors)
         .set(updateData)
-        .where(eq(merchantProcessors.id, processorId))
+        .where(and(
+          eq(merchantProcessors.id, processorId),
+          eq(merchantProcessors.organizationId, organizationId)
+        ))
         .returning()
 
       if (!updated) {
@@ -249,9 +279,9 @@ export class MerchantProcessorService {
       }
 
       logger.info('Processor configuration updated', {
-        merchantId,
+        organizationId,
         processorId,
-        updates: Object.keys(updates),
+        processorType: updated.processorType,
       })
 
       // Return without credentials
@@ -261,7 +291,7 @@ export class MerchantProcessorService {
         webhookSecret: updated.webhookSecret ? 'CONFIGURED' : null,
       }
     } catch (error) {
-      logger.error('Failed to update processor', error as Error, { merchantId, processorId })
+      logger.error('Failed to update processor', error as Error, { organizationId, processorId })
       throw error
     }
   }
@@ -270,7 +300,7 @@ export class MerchantProcessorService {
    * Delete processor configuration
    */
   static async deleteProcessor(
-    merchantId: string,
+    organizationId: string,
     processorId: string
   ): Promise<void> {
     try {
@@ -278,26 +308,57 @@ export class MerchantProcessorService {
         .delete(merchantProcessors)
         .where(and(
           eq(merchantProcessors.id, processorId),
-          eq(merchantProcessors.merchantId, merchantId)
+          eq(merchantProcessors.organizationId, organizationId)
         ))
-        .returning()
 
-      if (result.length === 0) {
-        throw new NotFoundError('Processor configuration not found')
-      }
-
-      logger.info('Processor configuration deleted', { merchantId, processorId })
+      logger.info('Processor configuration deleted', {
+        organizationId,
+        processorId,
+      })
     } catch (error) {
-      logger.error('Failed to delete processor', error as Error, { merchantId, processorId })
+      logger.error('Failed to delete processor', error as Error, { organizationId, processorId })
       throw error
     }
   }
 
   /**
-   * Get webhook endpoint URL for a processor
+   * Get the default/primary processor for an organization
+   */
+  static async getDefaultProcessor(
+    organizationId: string,
+    isTestMode: boolean = true
+  ): Promise<MerchantProcessor | null> {
+    // For now, prioritize Stripe, then any active processor
+    const processors = await db.query.merchantProcessors.findMany({
+      where: and(
+        eq(merchantProcessors.organizationId, organizationId),
+        eq(merchantProcessors.isTestMode, isTestMode),
+        eq(merchantProcessors.isActive, true)
+      ),
+      orderBy: (processors, { asc, desc }) => [
+        // Prioritize Stripe
+        desc(processors.processorType),
+        // Then by creation date
+        asc(processors.createdAt)
+      ],
+    })
+
+    if (processors.length === 0) return null
+
+    // Return without credentials
+    const processor = processors[0]
+    return {
+      ...processor,
+      encryptedCredentials: { masked: true },
+      webhookSecret: processor.webhookSecret ? 'CONFIGURED' : null,
+    }
+  }
+
+  /**
+   * Get the webhook URL for a specific processor type
    */
   static getWebhookUrl(processorType: ProcessorType): string {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    return `${baseUrl}/api/v1/webhooks/${processorType}`
+    return `${baseUrl}/api/v1/webhooks/${processorType.toLowerCase()}`
   }
 }

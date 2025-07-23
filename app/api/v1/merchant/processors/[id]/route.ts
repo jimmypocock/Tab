@@ -14,8 +14,8 @@ import { logger } from '@/lib/logger'
 import { MerchantProcessorService } from '@/lib/services/merchant-processor.service'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { merchants } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { organizationUsers, organizations } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 
 // Schema for updating a processor
 const updateProcessorSchema = z.object({
@@ -38,13 +38,19 @@ export async function PATCH(
       throw new UnauthorizedError('Authentication required')
     }
 
-    // Get merchant
-    const merchant = await db.query.merchants.findFirst({
-      where: eq(merchants.id, user.id),
+    // Get user's organization (for now, use the first active organization)
+    const organizationData = await db.query.organizationUsers.findFirst({
+      where: and(
+        eq(organizationUsers.userId, user.id),
+        eq(organizationUsers.status, 'active')
+      ),
+      with: {
+        organization: true
+      }
     })
 
-    if (!merchant) {
-      throw new NotFoundError('Merchant account not found')
+    if (!organizationData?.organization) {
+      throw new NotFoundError('Organization not found')
     }
 
     // Parse and validate request body
@@ -57,7 +63,7 @@ export async function PATCH(
 
     // Update the processor
     const processor = await MerchantProcessorService.updateProcessor(
-      merchant.id,
+      organizationData.organization.id,
       processorId,
       validation.data
     )
@@ -87,17 +93,23 @@ export async function DELETE(
       throw new UnauthorizedError('Authentication required')
     }
 
-    // Get merchant
-    const merchant = await db.query.merchants.findFirst({
-      where: eq(merchants.id, user.id),
+    // Get user's organization (for now, use the first active organization)
+    const organizationData = await db.query.organizationUsers.findFirst({
+      where: and(
+        eq(organizationUsers.userId, user.id),
+        eq(organizationUsers.status, 'active')
+      ),
+      with: {
+        organization: true
+      }
     })
 
-    if (!merchant) {
-      throw new NotFoundError('Merchant account not found')
+    if (!organizationData?.organization) {
+      throw new NotFoundError('Organization not found')
     }
 
     // Delete the processor
-    await MerchantProcessorService.deleteProcessor(merchant.id, processorId)
+    await MerchantProcessorService.deleteProcessor(organizationData.organization.id, processorId)
 
     return createSuccessResponse({ success: true })
       

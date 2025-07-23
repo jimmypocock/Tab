@@ -3,6 +3,7 @@ import { render, RenderOptions } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NextRouter } from 'next/router'
 import { RouterContext } from 'next/dist/shared/lib/router-context.shared-runtime'
+import { ToastProvider } from '@/lib/toast/toast-context'
 
 // Mock router
 export const mockRouter: NextRouter = {
@@ -72,9 +73,11 @@ const AllTheProviders: React.FC<AllTheProvidersProps> = ({
   return (
     <QueryClientProvider client={testQueryClient}>
       <RouterContext.Provider value={testRouter}>
-        <MockThemeProvider>
-          {children}
-        </MockThemeProvider>
+        <ToastProvider>
+          <MockThemeProvider>
+            {children}
+          </MockThemeProvider>
+        </ToastProvider>
       </RouterContext.Provider>
     </QueryClientProvider>
   )

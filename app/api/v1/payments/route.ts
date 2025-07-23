@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
 import { payments } from '@/lib/db/schema'
-import { withApiAuth, parseJsonBody, ApiContext } from '@/lib/api/middleware'
+import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
+import { parseJsonBody } from '@/lib/api/middleware'
 import { createPaymentSchema, validateInput } from '@/lib/api/validation'
 import { eq, and } from 'drizzle-orm'
 import { 
@@ -19,7 +20,7 @@ import { MerchantProcessorService } from '@/lib/services/merchant-processor.serv
 import { ProcessorType } from '@/lib/payment-processors/types'
 
 export async function POST(request: NextRequest) {
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
     // Parse and validate request body
     const body = await parseJsonBody(req)
     
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
         where: (tabs, { eq, and }) => 
           and(
             eq(tabs.id, data.tabId),
-            eq(tabs.merchantId, context.merchantId)
+            eq(tabs.organizationId, context.organizationId)
           ),
       })
 
@@ -58,12 +59,12 @@ export async function POST(request: NextRequest) {
         }])
       }
 
-      // Get merchant's payment processor (defaulting to Stripe for now)
+      // Get organization's payment processor (defaulting to Stripe for now)
       const processorType = data.processorType || ProcessorType.STRIPE
       const processor = await MerchantProcessorService.createProcessorInstance(
-        context.merchantId,
+        context.organizationId,
         processorType,
-        context.environment === 'test'
+        context.scope === 'merchant' && context.authType === 'apiKey'
       )
 
       // Create payment intent with the processor
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
         description: `Payment for Tab ${tab.id}`,
         metadata: {
           tab_id: tab.id,
-          merchant_id: context.merchantId,
+          organization_id: context.organizationId,
           customer_email: tab.customerEmail,
           ...data.metadata,
         }
@@ -81,9 +82,9 @@ export async function POST(request: NextRequest) {
 
       // Get the processor configuration to record which one was used
       const processorConfig = await MerchantProcessorService.getProcessor(
-        context.merchantId,
+        context.organizationId,
         processorType,
-        context.environment === 'test'
+        context.scope === 'merchant' && context.authType === 'apiKey'
       )
 
       // Create payment record
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
       logger.info('Payment created', {
         paymentId: payment?.id,
         tabId: tab.id,
-        merchantId: context.merchantId,
+        organizationId: context.organizationId,
         processorType,
         amount: data.amount,
       })
@@ -127,16 +128,18 @@ export async function POST(request: NextRequest) {
         throw error
       }
       logger.error('Failed to create payment', error as Error, {
-        merchantId: context.merchantId,
+        organizationId: context.organizationId,
         tabId: data.tabId,
       })
       throw new DatabaseError('Failed to create payment', error)
     }
+  }, {
+    requiredScope: 'merchant'
   })
 }
 
 export async function GET(request: NextRequest) {
-  return withApiAuth(request, async (req: NextRequest, context: ApiContext) => {
+  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
     try {
       // Get query parameters
       const { searchParams } = new URL(req.url)
@@ -149,12 +152,12 @@ export async function GET(request: NextRequest) {
       const conditions = []
       
       if (tabId) {
-        // Verify tab belongs to merchant
+        // Verify tab belongs to organization
         const tab = await db.query.tabs.findFirst({
           where: (tabs, { eq, and }) => 
             and(
               eq(tabs.id, tabId),
-              eq(tabs.merchantId, context.merchantId)
+              eq(tabs.organizationId, context.organizationId)
             ),
         })
         
@@ -181,9 +184,9 @@ export async function GET(request: NextRequest) {
         orderBy: (payments, { desc }) => [desc(payments.createdAt)],
       })
 
-      // Filter out payments not belonging to merchant
+      // Filter out payments not belonging to organization
       const filteredResults = results.filter(p => 
-        p.tab && p.tab.merchantId === context.merchantId
+        p.tab && p.tab.organizationId === context.organizationId
       )
 
       return new ApiResponseBuilder()
@@ -200,10 +203,12 @@ export async function GET(request: NextRequest) {
         throw error
       }
       logger.error('Failed to fetch payments', error as Error, {
-        merchantId: context.merchantId,
+        organizationId: context.organizationId,
       })
       throw new DatabaseError('Failed to fetch payments', error)
     }
+  }, {
+    requiredScope: 'merchant'
   })
 }
 

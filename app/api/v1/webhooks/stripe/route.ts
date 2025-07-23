@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import { db } from '@/lib/db/client'
 import { payments, tabs } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { logger } from '@/lib/logger'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
@@ -19,20 +20,25 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret)
   } catch (err: any) {
-    console.error('Webhook signature verification failed:', err.message)
+    logger.error('Webhook signature verification failed', err, { 
+      error: err.message 
+    })
     return NextResponse.json(
       { error: 'Invalid signature' },
       { status: 400 }
     )
   }
   
-  console.log('Stripe webhook received:', event.type, event.id)
+  logger.info('Stripe webhook received', {
+    eventType: event.type,
+    eventId: event.id
+  })
 
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
-        console.log('Processing checkout.session.completed:', {
+        logger.info('Processing checkout.session.completed', {
           sessionId: session.id,
           paymentIntent: session.payment_intent,
           metadata: session.metadata,
@@ -44,7 +50,9 @@ export async function POST(request: NextRequest) {
         const amount = session.metadata?.amount || (session.amount_total ? session.amount_total / 100 : 0)
         
         if (!tabId) {
-          console.error('No tabId in checkout session metadata')
+          logger.error('No tabId in checkout session metadata', undefined, {
+            sessionId: session.id
+          })
           return NextResponse.json({ error: 'Missing tabId' }, { status: 400 })
         }
         
@@ -53,7 +61,7 @@ export async function POST(request: NextRequest) {
           ? session.payment_intent 
           : session.payment_intent?.id || session.id
         
-        console.log('Creating payment record:', {
+        logger.info('Creating payment record', {
           tabId,
           amount,
           paymentIntentId,
@@ -80,7 +88,10 @@ export async function POST(request: NextRequest) {
           throw new Error('Failed to create payment record')
         }
         
-        console.log('Payment record created:', payment.id)
+        logger.info('Payment record created', {
+          paymentId: payment.id,
+          tabId: payment.tabId
+        })
         
         // Update tab paid amount
         const tab = await db.query.tabs.findFirst({
@@ -91,7 +102,7 @@ export async function POST(request: NextRequest) {
           const newPaidAmount = parseFloat(tab.paidAmount) + parseFloat(payment.amount)
           const newStatus = newPaidAmount >= parseFloat(tab.totalAmount) ? 'paid' : 'partial'
           
-          console.log('Updating tab:', {
+          logger.info('Updating tab', {
             tabId: tab.id,
             oldPaidAmount: tab.paidAmount,
             newPaidAmount,
@@ -107,9 +118,13 @@ export async function POST(request: NextRequest) {
             })
             .where(eq(tabs.id, tab.id))
             
-          console.log('Tab updated successfully')
+          logger.info('Tab updated successfully', {
+            tabId: tab.id
+          })
         } else {
-          console.error('Tab not found:', tabId)
+          logger.error('Tab not found', undefined, {
+            tabId
+          })
         }
         break
       }
@@ -237,12 +252,18 @@ export async function POST(request: NextRequest) {
       }
 
       default:
-        console.log(`Unhandled event type ${event.type}`)
+        logger.debug('Unhandled webhook event type', {
+          eventType: event.type,
+          eventId: event.id
+        })
     }
 
     return NextResponse.json({ received: true })
   } catch (error) {
-    console.error('Error processing webhook:', error)
+    logger.error('Error processing webhook', error as Error, {
+      eventType: event.type,
+      eventId: event.id
+    })
     return NextResponse.json(
       { error: 'Webhook processing failed' },
       { status: 500 }

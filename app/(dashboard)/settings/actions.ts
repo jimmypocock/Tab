@@ -13,6 +13,21 @@ export async function createNewApiKey(name: string) {
     return { error: 'Not authenticated' }
   }
   
+  // Get user's current organization
+  const { data: userOrganizations } = await supabase
+    .from('organization_users')
+    .select(`
+      organizations (id)
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .limit(1)
+  
+  const organizationId = userOrganizations?.[0]?.organizations?.id
+  if (!organizationId) {
+    return { error: 'No organization found' }
+  }
+  
   // Generate a unique API key
   let apiKey: string
   let keyHash: string
@@ -48,7 +63,7 @@ export async function createNewApiKey(name: string) {
   const { error } = await supabase
     .from('api_keys')
     .insert({
-      merchant_id: user.id,
+      organization_id: organizationId,
       key_hash: keyHash!,
       key_prefix: keyPrefix,
       name: name,
@@ -56,7 +71,8 @@ export async function createNewApiKey(name: string) {
     })
   
   if (error) {
-    return { error: 'Failed to create API key' }
+    console.error('Failed to create API key:', error)
+    return { error: `Failed to create API key: ${error.message}` }
   }
   
   revalidatePath('/settings')
@@ -71,11 +87,26 @@ export async function deleteApiKey(keyId: string) {
     return { error: 'Not authenticated' }
   }
   
+  // Get user's current organization
+  const { data: userOrganizations } = await supabase
+    .from('organization_users')
+    .select(`
+      organizations (id)
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .limit(1)
+  
+  const organizationId = userOrganizations?.[0]?.organizations?.id
+  if (!organizationId) {
+    return { error: 'No organization found' }
+  }
+  
   const { error } = await supabase
     .from('api_keys')
     .update({ is_active: false })
     .eq('id', keyId)
-    .eq('merchant_id', user.id)
+    .eq('organization_id', organizationId)
   
   if (error) {
     return { error: 'Failed to delete API key' }
@@ -93,10 +124,25 @@ export async function getApiKeys() {
     return []
   }
   
+  // Get user's current organization
+  const { data: userOrganizations } = await supabase
+    .from('organization_users')
+    .select(`
+      organizations (id)
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .limit(1)
+  
+  const organizationId = userOrganizations?.[0]?.organizations?.id
+  if (!organizationId) {
+    return []
+  }
+  
   const { data } = await supabase
     .from('api_keys')
     .select('*')
-    .eq('merchant_id', user.id)
+    .eq('organization_id', organizationId)
     .eq('is_active', true)
     .order('created_at', { ascending: false })
   

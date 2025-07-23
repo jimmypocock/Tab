@@ -8,13 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "setup": "node scripts/setup.js",
-    "db:push": "drizzle-kit push",
-    "db:generate": "drizzle-kit generate",
-    "db:push:local": "DATABASE_URL=postgresql://postgres:postgres@localhost:54322/postgres drizzle-kit push",
+    "db:diff": "supabase db diff --use-migra",
+    "db:new": "supabase migration new",
+    "db:push": "supabase db push",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
     "stripe:listen": "stripe listen --forward-to localhost:1235/api/v1/webhooks/stripe",
+    "webhook:ngrok": "node scripts/ngrok-webhook.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -23,7 +24,9 @@
     "test:integration": "jest __tests__/integration",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "test:visual": "playwright test --update-snapshots",
+    "test:visual:ci": "playwright test"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",

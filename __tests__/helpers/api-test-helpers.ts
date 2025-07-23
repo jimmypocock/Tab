@@ -41,14 +41,15 @@ export function createTestRequest(
 }
 
 export function createAuthenticatedRequest(
+  method: string,
   url: string,
-  apiKey: string,
-  options: CreateRequestOptions = {}
+  body: any,
+  apiKey: string
 ): NextRequest {
   return createTestRequest(url, {
-    ...options,
+    method,
+    body,
     headers: {
-      ...options.headers,
       'X-API-Key': apiKey,
     },
   })
@@ -161,5 +162,17 @@ export const apiAssertions = {
     expect(data.meta).toHaveProperty('limit')
     expect(data.meta).toHaveProperty('total')
     expect(data.meta).toHaveProperty('totalPages')
+  },
+  
+  expectUnauthorized: async (response: NextResponse) => {
+    expect(response.status).toBe(401)
+    const data = await getResponseData(response)
+    expect(data.error).toBeDefined()
+  },
+  
+  expectNotFound: async (response: NextResponse) => {
+    expect(response.status).toBe(404)
+    const data = await getResponseData(response)
+    expect(data.error).toBeDefined()
   },
 }

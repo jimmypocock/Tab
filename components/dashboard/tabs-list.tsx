@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { format } from 'date-fns'
+import { useToast } from '@/lib/toast/toast-context'
 
 interface Tab {
   id: string
@@ -25,6 +26,7 @@ interface PaginationInfo {
 export function TabsList() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { showToast } = useToast()
   const [tabs, setTabs] = useState<Tab[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,7 +65,11 @@ export function TabsList() {
       }
     } catch (err) {
       setError('Error loading tabs')
-      console.error(err)
+      showToast({
+        type: 'error',
+        title: 'Failed to load tabs',
+        description: 'Please try again later'
+      })
     } finally {
       setIsLoading(false)
     }
@@ -90,8 +96,17 @@ export function TabsList() {
       await navigator.clipboard.writeText(link)
       setCopiedTabId(tabId)
       setTimeout(() => setCopiedTabId(null), 2000)
+      showToast({
+        type: 'success',
+        title: 'Payment link copied',
+        description: 'The payment link has been copied to your clipboard'
+      })
     } catch (err) {
-      console.error('Failed to copy:', err)
+      showToast({
+        type: 'error',
+        title: 'Failed to copy',
+        description: 'Could not copy the payment link to clipboard'
+      })
     }
   }
 

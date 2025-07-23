@@ -278,7 +278,10 @@ export function createApiResponse(
   status: number = 200,
   _headers?: HeadersInit
 ) {
-  console.warn('createApiResponse is deprecated. Use createSuccessResponse instead.')
+  logger.warn('createApiResponse is deprecated. Use createSuccessResponse instead.', {
+    deprecation: 'createApiResponse',
+    replacement: 'createSuccessResponse'
+  })
   return createSuccessResponse(data, undefined, status)
 }
 
@@ -288,6 +291,9 @@ export function createApiError(
   _code?: string,
   _details?: any
 ) {
-  console.warn('createApiError is deprecated. Use AppError classes instead.')
+  logger.warn('createApiError is deprecated. Use AppError classes instead.', {
+    deprecation: 'createApiError',
+    replacement: 'AppError classes'
+  })
   return createErrorResponse(new Error(message))
 }

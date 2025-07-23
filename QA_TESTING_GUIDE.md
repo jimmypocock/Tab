@@ -1,6 +1,6 @@
 # Tab Application - Comprehensive QA Testing Guide
 
-This guide provides a complete testing checklist for the Tab payment collection platform, covering all UI interactions, API endpoints, and payment flows.
+This guide provides a complete testing checklist for the Tab payment collection platform, covering all UI interactions, API endpoints, payment flows, and the new corporate accounts and professional invoicing features.
 
 ## Prerequisites
 
@@ -23,6 +23,8 @@ Before starting QA testing:
    - Local API Keys:
      - `tab_test_12345678901234567890123456789012`
      - `tab_test_98765432109876543210987654321098`
+   - Corporate API Keys (create via UI):
+     - `corp_test_[generated]`
    - Stripe Test Cards:
      - Success: `4242 4242 4242 4242`
      - Decline: `4000 0000 0000 0002`
@@ -101,15 +103,25 @@ Before starting QA testing:
   - [ ] Payment history
   - [ ] Tab summary with totals
 - [ ] Test "Copy Payment Link" button
-- [ ] Test "Send Invoice" functionality (if available)
+- [ ] Test "Send Invoice" button:
+  - [ ] Opens invoice creation modal
+  - [ ] Can select specific line items
+  - [ ] Sets payment terms and due date
 
 ### 2.4 Invoices Page
 
 - [ ] Navigate to /invoices
 - [ ] Verify invoice list displays
-- [ ] Check invoice statuses (draft/sent/viewed/paid/overdue)
-- [ ] Test sending an invoice
+- [ ] Check invoice statuses (draft/sent/viewed/partial/paid/void/uncollectible)
+- [ ] Test creating invoice from tab:
+  - [ ] Select tab to invoice
+  - [ ] Choose line items to include
+  - [ ] Set due date and payment terms
+- [ ] Test sending an invoice:
+  - [ ] Select recipients (can remove/add emails)
+  - [ ] Send to multiple recipients (CC)
 - [ ] Verify email received at <http://localhost:54324>
+- [ ] Check invoice public URL works
 
 ### 2.5 Settings Page
 
@@ -120,6 +132,84 @@ Before starting QA testing:
   - [ ] Delete API key
   - [ ] Verify deleted key no longer works
 - [ ] View API documentation examples
+
+### 2.6 Payment Processors (NEW)
+
+- [ ] Navigate to /settings/processors
+- [ ] Test adding Stripe processor:
+  - [ ] Enter test API key
+  - [ ] Select test mode
+  - [ ] Save and verify connection
+  - [ ] Check webhook auto-configuration
+- [ ] Verify webhook status indicators
+- [ ] Test deactivating/reactivating processor
+
+### 2.7 Corporate Accounts (NEW)
+
+- [ ] Navigate to /settings/corporate-accounts
+- [ ] View list of corporate relationships
+- [ ] Test adding corporate account:
+  - [ ] Enter company details
+  - [ ] Set credit limit and payment terms
+  - [ ] Configure discount percentage
+- [ ] Manage existing relationships:
+  - [ ] Update credit limits
+  - [ ] Change status (active/suspended)
+  - [ ] View account activity
+
+### 2.8 Team Management
+
+- [ ] Navigate to /settings/team
+- [ ] View current team members and their roles
+- [ ] Test inviting new team member:
+  - [ ] Enter email address
+  - [ ] Select role (owner/admin/member/viewer)
+  - [ ] Send invitation
+  - [ ] Verify invitation email at http://localhost:54324
+- [ ] Test invitation flow:
+  - [ ] Click invitation link in email
+  - [ ] Accept invitation and create account
+  - [ ] Verify correct role assigned
+  - [ ] Check access permissions match role
+- [ ] Manage team members:
+  - [ ] Update member roles
+  - [ ] Remove team members
+  - [ ] Verify removed members lose access
+
+### 2.9 Organization Management
+
+- [ ] Test organization switcher in dashboard header:
+  - [ ] Click organization dropdown
+  - [ ] View all available organizations
+  - [ ] Switch between organizations
+  - [ ] Verify data isolation between organizations
+- [ ] Test organization setup (new users):
+  - [ ] Navigate to /settings/setup-organization
+  - [ ] Enter organization name
+  - [ ] Verify slug auto-generation
+  - [ ] Select organization type (merchant/corporate/both)
+  - [ ] Complete setup
+- [ ] Organization settings:
+  - [ ] Update organization name
+  - [ ] Change billing email
+  - [ ] Configure time zone
+  - [ ] Set default currency
+
+### 2.10 B2B Relationships
+
+- [ ] View organization relationships:
+  - [ ] See connected organizations
+  - [ ] Check credit limits and terms
+  - [ ] View payment history
+- [ ] Create B2B relationship:
+  - [ ] Add trusted organization
+  - [ ] Set credit limit
+  - [ ] Configure payment terms (NET15/30/60)
+  - [ ] Enable auto-pay options
+- [ ] Test relationship limits:
+  - [ ] Create tab exceeding credit limit (should fail)
+  - [ ] Verify credit utilization tracking
+  - [ ] Test suspended relationship access
 
 ---
 
@@ -172,96 +262,137 @@ curl -X POST http://localhost:1235/api/v1/tabs \
 # Expected: 201 Created with tab object including payment_link
 ```
 
-### 3.3 List Tabs with Filtering
+### 3.3 Professional Invoicing API (NEW)
 
 ```bash
-# List all tabs
+# Create invoice from tab
+curl -X POST http://localhost:1235/api/v1/tabs/TAB_ID/invoice \
+  -H "X-API-Key: tab_test_12345678901234567890123456789012" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lineItemIds": ["item1_id", "item2_id"],
+    "dueDate": "2025-02-15",
+    "paymentTerms": "NET30",
+    "notes": "Thank you for your business"
+  }'
+# Expected: 201 Created with invoice object
+
+# List invoices
+curl -X GET http://localhost:1235/api/v1/invoices \
+  -H "X-API-Key: tab_test_12345678901234567890123456789012"
+
+# Get specific invoice
+curl -X GET http://localhost:1235/api/v1/invoices/INVOICE_ID \
+  -H "X-API-Key: tab_test_12345678901234567890123456789012"
+
+# Send invoice via email
+curl -X POST http://localhost:1235/api/v1/invoices/INVOICE_ID/send \
+  -H "X-API-Key: tab_test_12345678901234567890123456789012" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipientEmail": "customer@example.com",
+    "ccEmails": ["accounting@example.com"]
+  }'
+```
+
+### 3.4 Corporate Account API (NEW)
+
+```bash
+# Test corporate authentication
+curl -X GET http://localhost:1235/api/v1/corporate/account \
+  -H "X-Corporate-API-Key: corp_test_[your_key]"
+# Expected: 200 OK with account details and merchant relationships
+
+# Create tab as corporate account
+curl -X POST http://localhost:1235/api/v1/corporate/tabs \
+  -H "X-Corporate-API-Key: corp_test_[your_key]" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "MERCHANT_UUID",
+    "purchase_order_number": "PO-2025-001",
+    "department": "Engineering",
+    "cost_center": "CC-100",
+    "line_items": [
+      {
+        "description": "Parts Order",
+        "quantity": 10,
+        "unit_price": 25.00
+      }
+    ]
+  }'
+# Expected: 201 Created with tab linked to corporate account
+
+# List all tabs across merchants
+curl -X GET http://localhost:1235/api/v1/corporate/tabs \
+  -H "X-Corporate-API-Key: corp_test_[your_key]"
+
+# Get spending report
+curl -X GET "http://localhost:1235/api/v1/corporate/reports/spending?date_from=2025-01-01&date_to=2025-01-31" \
+  -H "X-Corporate-API-Key: corp_test_[your_key]"
+```
+
+### 3.5 Organization Context API Testing
+
+```bash
+# Test API with organization context header
 curl -X GET http://localhost:1235/api/v1/tabs \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# Filter by status
-curl -X GET "http://localhost:1235/api/v1/tabs?status=open" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# Filter by customer email
-curl -X GET "http://localhost:1235/api/v1/tabs?customerEmail=qa_customer@example.com" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# Pagination
-curl -X GET "http://localhost:1235/api/v1/tabs?limit=10&offset=0" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# Field selection
-curl -X GET "http://localhost:1235/api/v1/tabs?fields=id,customerEmail,totalAmount,status" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-```
-
-### 3.4 Get Specific Tab
-
-```bash
-# Replace TAB_ID with actual ID from creation
-curl -X GET http://localhost:1235/api/v1/tabs/TAB_ID \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# With field selection
-curl -X GET "http://localhost:1235/api/v1/tabs/TAB_ID?fields=id,lineItems,payments" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-```
-
-### 3.5 Update Tab
-
-```bash
-# Update customer information
-curl -X PATCH http://localhost:1235/api/v1/tabs/TAB_ID \
   -H "X-API-Key: tab_test_12345678901234567890123456789012" \
+  -H "X-Organization-Id: org_123"
+# Expected: 200 OK with tabs for specified organization
+
+# Test multi-organization access
+# First, get list of available organizations
+curl -X GET http://localhost:1235/api/v1/auth/organizations \
+  -H "Authorization: Bearer [your_auth_token]"
+# Expected: List of organizations user has access to
+
+# Switch organization context
+curl -X POST http://localhost:1235/api/v1/auth/switch-organization \
+  -H "Authorization: Bearer [your_auth_token]" \
   -H "Content-Type: application/json" \
   -d '{
-    "customerName": "Updated QA Customer",
-    "metadata": {
-      "updated": true,
-      "update_timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
-    }
+    "organizationId": "org_456"
   }'
+# Expected: 200 OK with new context set
 ```
 
-### 3.6 Add Line Items to Existing Tab
+### 3.6 Team Invitation API
 
 ```bash
-# Add new line item
-curl -X POST http://localhost:1235/api/v1/line-items \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012" \
+# Send team invitation
+curl -X POST http://localhost:1235/api/v1/auth/invite \
+  -H "Authorization: Bearer [your_auth_token]" \
   -H "Content-Type: application/json" \
   -d '{
-    "tabId": "TAB_ID",
-    "description": "Additional Item",
-    "quantity": 1,
-    "unitPrice": 25.00
+    "email": "newteammember@example.com",
+    "role": "member",
+    "organizationId": "org_123"
   }'
+# Expected: 201 Created with invitation details
+
+# Accept invitation (requires invitation token from email)
+curl -X POST http://localhost:1235/api/v1/auth/accept-invitation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "invitation_token_from_email",
+    "password": "newpassword123",
+    "name": "New Team Member"
+  }'
+# Expected: 200 OK with user created and added to organization
 ```
 
-### 3.7 List Payments
+### 3.7 Webhook Status API
 
 ```bash
-# List all payments
-curl -X GET http://localhost:1235/api/v1/payments \
+# Check webhook status for processor
+curl -X GET http://localhost:1235/api/v1/merchant/processors/[processor_id]/webhook-status \
   -H "X-API-Key: tab_test_12345678901234567890123456789012"
+# Expected: 200 OK with webhook health status
 
-# Filter by tab
-curl -X GET "http://localhost:1235/api/v1/payments?tabId=TAB_ID" \
+# Manually trigger webhook verification
+curl -X POST http://localhost:1235/api/v1/merchant/processors/[processor_id]/webhook-status/verify \
   -H "X-API-Key: tab_test_12345678901234567890123456789012"
-
-# Filter by status
-curl -X GET "http://localhost:1235/api/v1/payments?status=succeeded" \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-```
-
-### 3.8 Delete Tab (only if no payments)
-
-```bash
-# Attempt to delete tab
-curl -X DELETE http://localhost:1235/api/v1/tabs/TAB_ID \
-  -H "X-API-Key: tab_test_12345678901234567890123456789012"
-# Expected: 204 No Content (if no payments) or 400 Bad Request (if has payments)
+# Expected: 200 OK with verification result
 ```
 
 ---
@@ -288,170 +419,301 @@ curl -X DELETE http://localhost:1235/api/v1/tabs/TAB_ID \
    - [ ] Verify success page displays
    - [ ] Check tab status updated to "paid" in dashboard
 
-3. **Failed Payment Testing**
-   - [ ] Test with decline card: `4000 0000 0000 0002`
-   - [ ] Verify error message displays
-   - [ ] Confirm tab status remains "open"
+### 4.2 Invoice Payment Flow (NEW)
 
-4. **3D Secure Testing**
-   - [ ] Test with 3DS card: `4000 0025 0000 3155`
-   - [ ] Complete 3D Secure authentication
-   - [ ] Verify payment processes successfully
+1. **Access Invoice Payment Page**
+   - [ ] Navigate to invoice public URL (/pay/invoice/[public_url])
+   - [ ] Verify invoice details display:
+     - [ ] Invoice number and merchant info
+     - [ ] Line items with individual amounts
+     - [ ] Payment terms and due date
+     - [ ] Total amount due
 
-### 4.2 Partial Payment Testing
+2. **Partial Invoice Payment**
+   - [ ] Test paying partial amount
+   - [ ] Verify payment allocation:
+     - [ ] FIFO allocation (oldest items paid first)
+     - [ ] Line items show allocated amounts
+     - [ ] Invoice status updates to "partial"
 
-1. **Create Tab via API** with high amount (e.g., $1000)
-2. **Make Partial Payment**
-   - [ ] Navigate to payment link
-   - [ ] Pay less than full amount (e.g., $200)
-   - [ ] Verify payment succeeds
-   - [ ] Check tab status is "partial"
-   - [ ] Verify remaining balance displays correctly
-
-3. **Complete Payment**
-   - [ ] Return to payment link
-   - [ ] Pay remaining balance
-   - [ ] Verify tab status updates to "paid"
-
-### 4.3 Webhook Testing
-
-1. **Ensure Stripe CLI is running**: `npm run stripe:listen`
-2. **Monitor webhook events** in terminal
-3. **Test webhook scenarios**:
-   - [ ] Successful payment → `payment_intent.succeeded`
-   - [ ] Failed payment → `payment_intent.payment_failed`
-   - [ ] Verify database updates occur
-   - [ ] Check payment records created/updated
+3. **Payment Allocation Testing**
+   - [ ] Create invoice with multiple line items
+   - [ ] Make payment less than total
+   - [ ] Verify in dashboard:
+     - [ ] Payment allocations show per line item
+     - [ ] Remaining amounts correct
+     - [ ] Can complete payment for remaining balance
 
 ---
 
-## 5. Edge Cases & Error Handling
+## 5. Business Use Case Testing (NEW)
 
-### 5.1 API Edge Cases
+### 5.1 Restaurant Bill Splitting
 
-- [ ] **Empty request bodies** → Should return 400
-- [ ] **Missing required fields** → Should return 400 with field errors
-- [ ] **Invalid data types** → Should return 400
-- [ ] **Non-existent resources** → Should return 404
-- [ ] **Duplicate operations** → Should handle gracefully
-- [ ] **Large payloads** → Test with 100+ line items
-- [ ] **Special characters** in text fields
-- [ ] **Maximum field lengths**
-- [ ] **Negative amounts** → Should be rejected
-- [ ] **Zero amounts** → Should be rejected
+1. **Create Restaurant Tab**
+   - [ ] Create tab with multiple food/beverage items
+   - [ ] Include shared items (appetizers) and individual items
 
-### 5.2 Payment Edge Cases
+2. **Split Invoice Creation**
+   - [ ] Create invoice for subset of items (Split 1)
+   - [ ] Create second invoice for other items (Split 2)
+   - [ ] Verify both invoices reference same tab
+   - [ ] Each person can pay their invoice independently
 
-- [ ] **Expired payment links** → Should show appropriate message
-- [ ] **Already paid tabs** → Should prevent double payment
-- [ ] **Concurrent payments** → Only one should succeed
-- [ ] **Network timeouts** → Should handle gracefully
-- [ ] **Browser back button** during payment → Should not duplicate
+### 5.2 Hotel Folio Management
 
-### 5.3 Authentication Edge Cases
+1. **Create Hotel Tab**
+   - [ ] Create tab with room charges
+   - [ ] Add incidental charges (minibar, room service)
+   - [ ] Add different service dates
 
-- [ ] **Expired sessions** → Should redirect to login
-- [ ] **Invalid API keys** → Should return 401
-- [ ] **Deleted API keys** → Should stop working immediately
-- [ ] **Multiple browser sessions** → Should work independently
+2. **Folio Testing**
+   - [ ] Create master folio invoice
+   - [ ] Test direct billing to corporate account
+   - [ ] Apply deposit to folio
+   - [ ] Verify remaining balance calculation
+
+### 5.3 Professional Services
+
+1. **Create Project with Milestones**
+   - [ ] Create tab for professional service
+   - [ ] Define project milestones
+   - [ ] Set milestone amounts or percentages
+
+2. **Milestone Invoicing**
+   - [ ] Create invoice for completed milestone
+   - [ ] Verify milestone tracks invoice status
+   - [ ] Test progress billing (percentage complete)
+
+3. **Retainer Account Testing**
+   - [ ] Create retainer account for client
+   - [ ] Test depositing funds
+   - [ ] Draw from retainer for invoice payment
+   - [ ] Verify balance tracking
+   - [ ] Test auto-replenishment rules
 
 ---
 
-## 6. Performance Testing
+## 6. Edge Cases & Error Handling
 
-### 6.1 Load Testing
+### 6.1 Invoice Edge Cases (NEW)
 
-```bash
-# Create multiple tabs rapidly
-for i in {1..50}; do
-  curl -X POST http://localhost:1235/api/v1/tabs \
-    -H "X-API-Key: tab_test_12345678901234567890123456789012" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "customerEmail": "load_test_'$i'@example.com",
-      "customerName": "Load Test Customer '$i'",
-      "currency": "USD",
-      "lineItems": [
-        {"description": "Item 1", "quantity": 1, "unitPrice": 10.00},
-        {"description": "Item 2", "quantity": 2, "unitPrice": 20.00}
-      ]
-    }' &
-done
-wait
-```
+- [ ] **Invoice Immutability** → Cannot edit sent invoices
+- [ ] **Status Transitions** → Invalid transitions rejected
+- [ ] **Version Control** → Amendments create new versions
+- [ ] **Concurrent Payments** → Proper allocation handling
+- [ ] **Over-payment** → Creates credit balance
+- [ ] **Void Invoice** → Cannot accept payments
 
-### 6.2 Response Time Checks
+### 6.2 Corporate Account Edge Cases (NEW)
 
-- [ ] Dashboard pages load < 2 seconds
-- [ ] API responses return < 500ms
-- [ ] Payment page loads < 3 seconds
-- [ ] Search/filter operations < 1 second
+- [ ] **Credit Limits** → Cannot exceed when creating tabs
+- [ ] **Inactive Relationships** → API calls rejected
+- [ ] **Multiple Merchants** → Data properly isolated
+- [ ] **Discount Application** → Correctly calculated
+
+### 6.3 Payment Allocation Edge Cases (NEW)
+
+- [ ] **FIFO Allocation** → Oldest items paid first
+- [ ] **Proportional Split** → Correctly distributed
+- [ ] **Manual Allocation** → Respects specified amounts
+- [ ] **Refund Reversal** → Allocations properly reversed
+
+### 6.4 Multi-Organization Edge Cases
+
+- [ ] **Organization Switching** → Data properly isolated
+- [ ] **Cross-Organization Access** → Cannot access other org data
+- [ ] **Deleted Organization** → Graceful handling
+- [ ] **Organization Limits** → Max organizations per user
+- [ ] **Default Organization** → Proper fallback behavior
+
+### 6.5 Team Management Edge Cases
+
+- [ ] **Expired Invitations** → Cannot be accepted
+- [ ] **Duplicate Invitations** → Properly handled
+- [ ] **Role Downgrade** → Existing sessions updated
+- [ ] **Owner Transfer** → At least one owner required
+- [ ] **Invitation Resend** → Invalidates previous token
 
 ---
 
 ## 7. Security Testing
 
-### 7.1 Authorization Checks
+### 7.1 Payment Processor Security (NEW)
 
-- [ ] Cannot access other merchants' data via API
-- [ ] Cannot access dashboard without authentication
-- [ ] Cannot modify tabs after payment
-- [ ] API keys are properly hashed in database
-- [ ] Sensitive data not exposed in responses
+- [ ] **Credential Encryption** → Verify encrypted in database
+- [ ] **API Key Masking** → Never exposed in responses
+- [ ] **Webhook Verification** → Invalid signatures rejected
+- [ ] **Test Mode Isolation** → Cannot process real payments
 
-### 7.2 Input Validation
+### 7.2 Corporate Account Security (NEW)
 
-- [ ] SQL injection attempts rejected
-- [ ] XSS attempts sanitized
-- [ ] CSRF protection active
-- [ ] Rate limiting enforced
+- [ ] **Account Isolation** → Cannot access other corp data
+- [ ] **Merchant Relationships** → Only see authorized merchants
+- [ ] **API Key Scoping** → Limited to corporate operations
 
----
+### 7.3 Organization Security
 
-## 8. Email Testing
+- [ ] **Data Isolation** → Complete separation between orgs
+- [ ] **API Key Binding** → Keys only work for their organization
+- [ ] **Role Enforcement** → Permissions properly checked
+- [ ] **Session Management** → Organization context maintained
+- [ ] **Audit Logging** → Actions tracked per organization
 
-Check all emails at <http://localhost:54324>:
+### 7.4 Team Invitation Security
 
-- [ ] **Registration confirmation** → Verify link works
-- [ ] **Password reset** → Test full flow
-- [ ] **Invoice emails** → Check formatting and links
-- [ ] **Payment confirmations** → Verify amount and details
-
----
-
-## 9. Mobile Responsiveness
-
-Test on various viewport sizes:
-
-- [ ] **Payment page** → Mobile-friendly
-- [ ] **Dashboard** → Responsive tables
-- [ ] **Forms** → Touch-friendly inputs
-- [ ] **Navigation** → Mobile menu works
+- [ ] **Token Security** → Cryptographically secure tokens
+- [ ] **Expiration Enforcement** → Old tokens rejected
+- [ ] **Email Verification** → Only invited email can accept
+- [ ] **Role Validation** → Cannot assign higher than own role
+- [ ] **Revocation** → Cancelled invitations blocked
 
 ---
 
-## 10. Browser Compatibility
+## 8. Toast Notifications Testing (NEW)
 
-Test core flows on:
-
-- [ ] Chrome (latest)
-- [ ] Firefox (latest)
-- [ ] Safari (latest)
-- [ ] Edge (latest)
-- [ ] Mobile browsers (iOS Safari, Chrome Android)
+- [ ] **Success Messages**:
+  - [ ] Invoice sent successfully
+  - [ ] Payment processed
+  - [ ] Settings saved
+- [ ] **Error Messages**:
+  - [ ] API failures
+  - [ ] Validation errors
+  - [ ] Network issues
+- [ ] **Toast Behavior**:
+  - [ ] Auto-dismiss timing
+  - [ ] Manual dismiss works
+  - [ ] Multiple toasts stack properly
 
 ---
 
-## Test Data Cleanup
+## 9. Database Migration Testing
 
-After testing, clean up test data:
+Before testing new features, ensure migrations are applied:
 
 ```bash
-# Reset local database
-npm run supabase:reset
+# Apply migrations
+npm run db:push:local
 
-# Or manually delete test records via Supabase Studio
-# http://localhost:54323
+# Verify tables exist in Supabase Studio
+# Check for:
+# - invoices (enhanced)
+# - invoice_line_items
+# - payment_allocations
+# - corporate_accounts
+# - corporate_merchant_relationships
+# - hotel_folios
+# - project_milestones
+# - retainer_accounts
+```
+
+---
+
+## 10. Automated Jobs Testing
+
+### 10.1 Cron Job Authentication
+
+```bash
+# Test cron job without auth (should fail)
+curl -X POST http://localhost:1235/api/v1/cron/cleanup-invitations
+# Expected: 401 Unauthorized
+
+# Test with incorrect secret
+curl -X POST http://localhost:1235/api/v1/cron/cleanup-invitations \
+  -H "X-Cron-Secret: wrong_secret"
+# Expected: 401 Unauthorized
+
+# Test with correct secret (from CRON_SECRET env var)
+curl -X POST http://localhost:1235/api/v1/cron/cleanup-invitations \
+  -H "X-Cron-Secret: [your_cron_secret]"
+# Expected: 200 OK with cleanup results
+```
+
+### 10.2 Scheduled Task Testing
+
+- [ ] **Invitation Cleanup**:
+  - [ ] Create expired invitation (>7 days old)
+  - [ ] Run cleanup job
+  - [ ] Verify invitation deleted
+  - [ ] Check active invitations preserved
+- [ ] **Future Jobs** (when implemented):
+  - [ ] Payment reconciliation
+  - [ ] Usage reports generation
+  - [ ] Data archival
+
+---
+
+## 11. Performance Testing
+
+### 11.1 Invoice Performance
+
+- [ ] Create invoice with 100+ line items
+- [ ] Test payment allocation performance
+- [ ] Verify calculated fields update correctly
+- [ ] Check invoice list pagination
+
+### 11.2 Corporate Account Performance
+
+- [ ] Create corporate account with 50+ merchant relationships
+- [ ] List tabs across all merchants
+- [ ] Generate spending reports for large date ranges
+
+---
+
+## Test Data Setup Script
+
+Create comprehensive test data:
+
+```bash
+# Create test merchant and get API key
+# Then run these commands to set up test scenarios
+
+# 1. Restaurant scenario
+curl -X POST http://localhost:1235/api/v1/tabs \
+  -H "X-API-Key: [your_test_key]" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customerEmail": "restaurant_table_5@example.com",
+    "customerName": "Table 5",
+    "lineItems": [
+      {"description": "Shared Appetizer", "quantity": 1, "unitPrice": 15.00, "metadata": {"category": "appetizer", "split_group": "shared"}},
+      {"description": "Steak - Seat 1", "quantity": 1, "unitPrice": 35.00, "metadata": {"category": "entree", "split_group": "seat_1"}},
+      {"description": "Wine - Seat 1", "quantity": 2, "unitPrice": 12.00, "metadata": {"category": "beverage", "split_group": "seat_1"}},
+      {"description": "Salmon - Seat 2", "quantity": 1, "unitPrice": 28.00, "metadata": {"category": "entree", "split_group": "seat_2"}},
+      {"description": "Beer - Seat 2", "quantity": 1, "unitPrice": 8.00, "metadata": {"category": "beverage", "split_group": "seat_2"}}
+    ]
+  }'
+
+# 2. Hotel scenario
+curl -X POST http://localhost:1235/api/v1/tabs \
+  -H "X-API-Key: [your_test_key]" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customerEmail": "hotel_guest@example.com",
+    "customerName": "John Smith - Room 412",
+    "lineItems": [
+      {"description": "Room Charge - Night 1", "quantity": 1, "unitPrice": 150.00, "metadata": {"category": "room", "service_date": "2025-01-20", "folio_category": "room_charge"}},
+      {"description": "Room Charge - Night 2", "quantity": 1, "unitPrice": 150.00, "metadata": {"category": "room", "service_date": "2025-01-21", "folio_category": "room_charge"}},
+      {"description": "Minibar", "quantity": 1, "unitPrice": 25.00, "metadata": {"category": "incidental", "folio_category": "incidental"}},
+      {"description": "Room Service", "quantity": 1, "unitPrice": 45.00, "metadata": {"category": "incidental", "folio_category": "incidental"}},
+      {"description": "City Tax", "quantity": 2, "unitPrice": 5.00, "metadata": {"category": "tax", "folio_category": "tax"}}
+    ]
+  }'
+
+# 3. Professional services scenario
+curl -X POST http://localhost:1235/api/v1/tabs \
+  -H "X-API-Key: [your_test_key]" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customerEmail": "client@company.com",
+    "customerName": "ABC Corporation",
+    "externalReference": "PROJECT-2025-001",
+    "lineItems": [
+      {"description": "Project Setup - Milestone 1", "quantity": 1, "unitPrice": 5000.00, "metadata": {"milestone": 1, "billing_type": "fixed_price"}},
+      {"description": "Development Phase - Milestone 2", "quantity": 1, "unitPrice": 15000.00, "metadata": {"milestone": 2, "billing_type": "fixed_price"}},
+      {"description": "Testing & Deployment - Milestone 3", "quantity": 1, "unitPrice": 10000.00, "metadata": {"milestone": 3, "billing_type": "fixed_price"}}
+    ]
+  }'
 ```
 
 ---
@@ -467,6 +729,7 @@ When reporting issues, include:
 5. **Browser console errors**
 6. **Network request/response data**
 7. **Test data used**
+8. **Feature area** (invoicing, corporate accounts, etc.)
 
 ---
 
@@ -485,6 +748,37 @@ npm run test:coverage
 npm run test:watch
 ```
 
+### 11.3 Multi-Organization Performance
+
+- [ ] User with 10+ organizations
+- [ ] Organization switching speed
+- [ ] Context loading performance
+- [ ] API response times with org context
+
 ---
 
-This comprehensive QA guide covers all aspects of the Tab application. Work through each section systematically, checking off items as you complete them. Pay special attention to payment flows and webhook handling as these are critical to the application's functionality.
+## Summary of Updates
+
+This comprehensive QA guide has been updated to include:
+
+### New Features Added:
+1. **Team Management** (Section 2.8) - Invitation system, role management
+2. **Organization Management** (Section 2.9) - Multi-org support, switching, setup
+3. **B2B Relationships** (Section 2.10) - Inter-organization connections
+4. **Organization Context API** (Section 3.5) - API testing with org context
+5. **Team Invitation API** (Section 3.6) - Invitation flow testing
+6. **Webhook Status API** (Section 3.7) - Health monitoring
+7. **Multi-Organization Edge Cases** (Section 6.4) - Edge case handling
+8. **Team Management Edge Cases** (Section 6.5) - Invitation edge cases
+9. **Organization Security** (Section 7.3) - Data isolation testing
+10. **Team Invitation Security** (Section 7.4) - Token security
+11. **Automated Jobs Testing** (Section 10) - Cron job testing
+12. **Multi-Organization Performance** (Section 11.3) - Performance with multiple orgs
+
+Work through each section systematically, paying special attention to:
+- Organization context and data isolation
+- Team invitation flows and role-based access
+- Multi-merchant scenarios with corporate accounts
+- Security boundaries between organizations
+
+---

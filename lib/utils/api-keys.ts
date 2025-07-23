@@ -1,7 +1,18 @@
 import crypto from 'crypto'
 
-export function generateApiKey(): string {
-  const prefix = process.env.NODE_ENV === 'production' ? 'tab_live' : 'tab_test'
+export function generateApiKey(type: 'org' | 'tab' = 'tab', environment: 'test' | 'live' | 'corp' = 'test'): string {
+  // Handle different key types
+  let prefix: string
+  if (type === 'org') {
+    if (environment === 'corp') {
+      prefix = 'org_corp'
+    } else {
+      prefix = environment === 'live' ? 'org_live' : 'org_test'
+    }
+  } else {
+    prefix = environment === 'live' ? 'tab_live' : 'tab_test'
+  }
+  
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   let key = ''
   

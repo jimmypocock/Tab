@@ -1,7 +1,11 @@
 import Link from 'next/link'
 import { ArrowRight, Code, CreditCard, FileText, Zap } from 'lucide-react'
+import { createClient } from '@/lib/supabase/server'
 
-export default function HomePage() {
+export default async function HomePage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Header */}
@@ -18,18 +22,29 @@ export default function HomePage() {
               <Link href="/docs" className="text-gray-600 hover:text-gray-900">Docs</Link>
             </nav>
             <div className="flex items-center space-x-4">
-              <Link
-                href="/login"
-                className="text-gray-600 hover:text-gray-900"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/register"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
-              >
-                Get Started
-              </Link>
+              {user ? (
+                <Link
+                  href="/dashboard"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+                >
+                  Go to Dashboard
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="text-gray-600 hover:text-gray-900"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/register"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+                  >
+                    Get Started
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>

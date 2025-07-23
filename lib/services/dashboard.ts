@@ -23,53 +23,44 @@ export interface RecentTab {
 /**
  * Get dashboard statistics with caching
  */
-export async function getDashboardStats(merchantId: string): Promise<DashboardStats> {
+export async function getDashboardStats(organizationId: string): Promise<DashboardStats> {
   return withRedisCache(
-    `dashboard:stats:${merchantId}`,
+    `dashboard:stats:${organizationId}`,
     async () => {
       const supabase = await createClient()
       
-      // Single optimized query to get all stats
-      const { data: stats, error } = await supabase.rpc('get_merchant_stats', {
-        merchant_id_param: merchantId
-      })
-      
+      const { data: tabs, error } = await supabase
+        .from('tabs')
+        .select('status, total_amount, paid_amount')
+        .eq('organization_id', organizationId)
+        
       if (error) {
-        logger.error('Failed to fetch dashboard stats', error, { merchantId })
-        // Fallback to regular query if RPC doesn't exist
-        const { data: tabs } = await supabase
-          .from('tabs')
-          .select('status, total_amount, paid_amount')
-          .eq('merchant_id', merchantId)
-        
-        if (!tabs) {
-          return {
-            total_tabs: 0,
-            open_tabs: 0,
-            total_revenue: 0,
-            pending_revenue: 0,
-          }
-        }
-        
+        logger.error('Failed to fetch dashboard stats', error, { organizationId })
         return {
-          total_tabs: tabs.length,
-          open_tabs: tabs.filter(t => t.status === 'open').length,
-          total_revenue: tabs.reduce((sum, t) => sum + parseFloat(t.paid_amount), 0),
-          pending_revenue: tabs.reduce((sum, t) => {
-            const balance = parseFloat(t.total_amount) - parseFloat(t.paid_amount)
-            return sum + (balance > 0 ? balance : 0)
-          }, 0),
+          total_tabs: 0,
+          open_tabs: 0,
+          total_revenue: 0,
+          pending_revenue: 0,
         }
       }
-      
-      // RPC returns an array with a single row
-      const statsData = Array.isArray(stats) ? stats[0] : stats
-      
-      return statsData || {
-        total_tabs: 0,
-        open_tabs: 0,
-        total_revenue: 0,
-        pending_revenue: 0,
+        
+      if (!tabs) {
+        return {
+          total_tabs: 0,
+          open_tabs: 0,
+          total_revenue: 0,
+          pending_revenue: 0,
+        }
+      }
+        
+      return {
+        total_tabs: tabs.length,
+        open_tabs: tabs.filter(t => t.status === 'open').length,
+        total_revenue: tabs.reduce((sum, t) => sum + parseFloat(t.paid_amount || '0'), 0),
+        pending_revenue: tabs.reduce((sum, t) => {
+          const balance = parseFloat(t.total_amount || '0') - parseFloat(t.paid_amount || '0')
+          return sum + (balance > 0 ? balance : 0)
+        }, 0),
       }
     },
     60 // Cache for 1 minute
@@ -79,9 +70,9 @@ export async function getDashboardStats(merchantId: string): Promise<DashboardSt
 /**
  * Get recent tabs with optimized query
  */
-export async function getRecentTabs(merchantId: string, limit: number = 5): Promise<RecentTab[]> {
+export async function getRecentTabs(organizationId: string, limit: number = 5): Promise<RecentTab[]> {
   return withRedisCache(
-    `dashboard:recent-tabs:${merchantId}:${limit}`,
+    `dashboard:recent-tabs:${organizationId}:${limit}`,
     async () => {
       const supabase = await createClient()
       
@@ -98,12 +89,12 @@ export async function getRecentTabs(merchantId: string, limit: number = 5): Prom
           created_at,
           line_items!inner(id)
         `)
-        .eq('merchant_id', merchantId)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(limit)
       
       if (error) {
-        logger.error('Failed to fetch recent tabs', error, { merchantId })
+        logger.error('Failed to fetch recent tabs', error, { organizationId })
         return []
       }
       
@@ -126,8 +117,10 @@ export async function getRecentTabs(merchantId: string, limit: number = 5): Prom
 /**
  * Invalidate dashboard cache when data changes
  */
-export async function invalidateDashboardCache(merchantId: string) {
-  // In production, this would invalidate multiple keys
-  // For now, just invalidate by merchant tag pattern
-  await invalidateCache(CacheTags.merchant(merchantId))
+export async function invalidateDashboardCache(organizationId: string) {
+  // Invalidate organization-specific cache patterns
+  await Promise.all([
+    invalidateCache(`dashboard:stats:${organizationId}`),
+    invalidateCache(`dashboard:recent-tabs:${organizationId}:*`),
+  ])
 }

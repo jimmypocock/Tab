@@ -107,7 +107,7 @@ class Logger {
     context?: LogContext
   ) {
     const { method, url } = request
-    const path = new URL(url).pathname
+    const path = url ? new URL(url).pathname : 'unknown'
 
     const level = statusCode >= 500 ? LogLevel.ERROR : 
                   statusCode >= 400 ? LogLevel.WARN : 

@@ -162,6 +162,10 @@ test-*.js
 *-temp.test.*
 api-simplified.test.ts
 
+# Jest output files
+tab-app@*
+jest
+
 # Local development
 local-data/
 .local/
