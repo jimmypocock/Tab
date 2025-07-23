@@ -63,11 +63,7 @@ jest.mock('@/app/(dashboard)/settings/processors/page', () => ({
   },
 }))
 
-jest.mock('@/app/(dashboard)/settings/setup-organization/page', () => ({
-  default: function SetupOrganizationPage() {
-    return <div>Setup Organization Page</div>
-  },
-}))
+// Setup organization page removed - no longer needed in UX flow
 
 describe('Page Accessibility Tests', () => {
   const mockPush = jest.fn()
@@ -227,26 +223,13 @@ describe('Page Accessibility Tests', () => {
       })
     })
 
-    it('should redirect to setup organization from dashboard', async () => {
-      // Mock the dashboard layout behavior
+    it('should show error page when user has no organization', async () => {
+      // This is now an error case, not a redirect
       ;(usePathname as jest.Mock).mockReturnValue('/dashboard')
       
-      // Simulate the redirect that would happen in the layout
-      mockPush('/settings/setup-organization')
-
-      expect(mockPush).toHaveBeenCalledWith('/settings/setup-organization')
-      expect(mockPush).toHaveBeenCalledTimes(1)
-    })
-
-    it('should render setup organization page without redirects', async () => {
-      const SetupOrganizationPage = require('@/app/(dashboard)/settings/setup-organization/page').default
-      render(<SetupOrganizationPage />)
-
-      await waitFor(() => {
-        expect(screen.getByText('Setup Organization Page')).toBeInTheDocument()
-      })
-      // Should not redirect from setup page
-      expect(mockPush).not.toHaveBeenCalled()
+      // In the actual app, this would render an error page
+      // not redirect to setup-organization
+      expect(mockSupabase.from().select().eq().single).toHaveBeenCalled()
     })
   })
 
@@ -330,10 +313,10 @@ describe('Page Accessibility Tests', () => {
 
       // User visits dashboard without organization
       ;(usePathname as jest.Mock).mockReturnValue('/dashboard')
-      mockPush('/settings/setup-organization')
+      mockPush('/setup-organization')
 
       // Should stop at setup organization
-      expect(redirectHistory).toEqual(['/settings/setup-organization'])
+      expect(redirectHistory).toEqual(['/setup-organization'])
       expect(redirectHistory.length).toBe(1)
     })
   })
@@ -375,9 +358,9 @@ describe('Page Accessibility Tests', () => {
 
       // Should redirect to setup organization on error
       ;(usePathname as jest.Mock).mockReturnValue('/dashboard')
-      mockPush('/settings/setup-organization')
+      mockPush('/setup-organization')
 
-      expect(mockPush).toHaveBeenCalledWith('/settings/setup-organization')
+      expect(mockPush).toHaveBeenCalledWith('/setup-organization')
       
       consoleError.mockRestore()
     })

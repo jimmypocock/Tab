@@ -28,10 +28,9 @@ export async function getTeamMembers(organizationId: string) {
       title,
       joined_at,
       invited_at,
-      users!organization_users_user_id_fkey (
+      user:users!user_id (
         id,
-        email,
-        raw_user_meta_data
+        email
       )
     `)
     .eq('organization_id', organizationId)
@@ -46,10 +45,10 @@ export async function getTeamMembers(organizationId: string) {
   // Transform the data to match our component's expected structure
   return members.map(member => ({
     id: member.id,
-    user: member.users ? {
-      id: member.users.id,
-      email: member.users.email,
-      full_name: member.users.raw_user_meta_data?.full_name
+    user: member.user ? {
+      id: member.user.id,
+      email: member.user.email,
+      full_name: undefined // We'll need to get this from auth.users if needed
     } : null,
     role: member.role,
     status: member.status,
@@ -139,11 +138,11 @@ export async function inviteTeamMember(
         // Get inviter details
         const { data: inviter } = await supabase
           .from('users')
-          .select('email, raw_user_meta_data')
+          .select('email')
           .eq('id', user.id)
           .single()
         
-        const inviterName = inviter?.raw_user_meta_data?.full_name || inviter?.email || 'A team member'
+        const inviterName = inviter?.email || 'A team member'
         
         // Create invitation with token
         const { invitation, token } = await InvitationService.createInvitation({

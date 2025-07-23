@@ -15,8 +15,8 @@ export async function GET(request: NextRequest) {
     })
 
     if (!error) {
-      // Redirect to dashboard after successful confirmation
-      return NextResponse.redirect(new URL(next, request.url))
+      // Redirect to confirmation success page
+      return NextResponse.redirect(new URL('/email-confirmed', request.url))
     }
   }
 

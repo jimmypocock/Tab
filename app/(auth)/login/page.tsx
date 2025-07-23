@@ -15,12 +15,21 @@ export default function LoginPage() {
   const supabase = createClient()
 
   useEffect(() => {
+    // Check if user is already logged in
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        router.push('/dashboard')
+      }
+    }
+    checkUser()
+
     // Check for error in URL params
     const urlError = searchParams.get('error')
     if (urlError) {
       setError(urlError)
     }
-  }, [searchParams])
+  }, [searchParams, router, supabase.auth])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()

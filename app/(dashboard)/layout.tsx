@@ -26,7 +26,7 @@ export default async function DashboardLayout({
   }
 
   // Get user's organizations
-  const { data: userOrganizations } = await supabase
+  const { data: userOrganizations, error: orgError } = await supabase
     .from('organization_users')
     .select(`
       role,
@@ -44,7 +44,35 @@ export default async function DashboardLayout({
 
   // Check if user has any organizations
   if (!userOrganizations || userOrganizations.length === 0) {
-    redirect('/settings/setup-organization')
+    // This should never happen - the trigger should create an org on signup
+    // If we're here, there's a serious issue with the database trigger
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full space-y-8 text-center">
+          <div>
+            <h2 className="text-3xl font-extrabold text-gray-900">
+              Critical: User has no organization
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              This indicates a database trigger failure. Please check the logs.
+            </p>
+            <p className="mt-4 text-xs text-gray-500">
+              User: {user.email} (ID: {user.id})
+            </p>
+            <div className="mt-6">
+              <form action={signOut}>
+                <button
+                  type="submit"
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                >
+                  Sign Out
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // For now, just use the first organization
@@ -53,7 +81,16 @@ export default async function DashboardLayout({
   const currentOrganizationData = userOrganizations[0]
     
   if (!currentOrganizationData?.organizations) {
-    redirect('/settings/setup-organization')
+    // This is also an error case - the join should always return the organization
+    console.error('Critical: Organization data missing from join', { userId: user.id })
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900">Configuration Error</h2>
+          <p className="mt-2 text-gray-600">Please contact support.</p>
+        </div>
+      </div>
+    )
   }
   
   const currentOrganization = currentOrganizationData.organizations
@@ -74,7 +111,11 @@ export default async function DashboardLayout({
   ]
 
   return (
-    <DashboardProviders>
+    <DashboardProviders 
+      currentOrganization={currentOrganization}
+      userRole={userRole}
+      organizations={organizations}
+    >
       <div className="min-h-screen bg-gray-50">
         {/* Sidebar */}
         <div className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg">

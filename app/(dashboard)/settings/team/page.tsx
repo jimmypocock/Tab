@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Users, UserPlus, Mail, MoreVertical, Shield, Clock, X } from 'lucide-react'
-import { useOrganization } from '@/components/dashboard/organization-provider'
+import { useOrganization } from '@/components/dashboard/organization-context'
 import { getTeamMembers, inviteTeamMember, updateMemberRole, removeMember, cancelInvitation, resendInvitation } from './actions'
 import { useToast } from '@/lib/toast/toast-context'
 

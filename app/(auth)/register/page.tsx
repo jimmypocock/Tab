@@ -26,7 +26,7 @@ export default function RegisterPage() {
         password,
         options: {
           data: {
-            business_name: businessName,
+            businessName: businessName,
           },
         },
       })
@@ -36,7 +36,7 @@ export default function RegisterPage() {
       } else if (authData.user) {
         // Merchant record is created automatically by database trigger
         // Redirect to a confirmation page
-        router.push('/confirm-email')
+        router.push(`/confirm-email?email=${encodeURIComponent(email)}`)
       }
     } catch (err) {
       setError('An unexpected error occurred')

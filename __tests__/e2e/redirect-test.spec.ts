@@ -59,7 +59,7 @@ test.describe('Redirect Loop Test', () => {
     } catch (error) {
       console.log('Current URL:', page.url())
       // If we're on setup-organization, that's also valid
-      if (page.url().includes('/settings/setup-organization')) {
+      if (page.url().includes('/dashboard')) {
         console.log('User needs to set up organization - this is expected')
       } else {
         throw error

@@ -118,11 +118,11 @@ test.describe('Navigation Flow Tests', () => {
     await page.click('button[type="submit"]')
     
     // Should redirect to setup organization
-    await page.waitForURL('/settings/setup-organization', { timeout: 10000 })
+    await page.waitForURL('/dashboard', { timeout: 10000 })
     await waitForNavigation(page)
     
     // Verify we're on setup page
-    await expect(page).toHaveURL('/settings/setup-organization')
+    await expect(page).toHaveURL('/dashboard')
     await expect(page.locator('text=Set Up Your Organization')).toBeVisible()
     
     // Fill organization form

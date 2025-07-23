@@ -1,5 +1,49 @@
 # TODO - Tab Payment Orchestration Platform
 
+## 🚨 IMMEDIATE PRIORITY FOR TOMORROW - USER SIGNUP ISSUE 🚨
+
+### CRITICAL BUG: Organization Creation Not Working After Email Confirmation
+
+**Problem**: Users complete registration → confirm email → get "Critical: User has no organization" error when accessing dashboard
+
+**Status**: 🔴 BLOCKING USER ONBOARDING
+
+**Investigation Results**:
+- ✅ Database trigger `handle_new_user()` works in isolation tests
+- ✅ Regular signup creates organizations correctly in test scripts  
+- ✅ Email confirmation flow works
+- ❌ **Real user flow fails** - confirmed users have no organizations
+
+**Next Steps for Tomorrow**:
+
+1. **Debug Real User Flow** 🔴 HIGHEST PRIORITY
+   - Use `/debug-user` page to inspect actual user data after signup/confirmation
+   - Compare test vs real signup metadata and trigger execution
+   - Check if trigger fires during actual registration vs test scenarios
+
+2. **Fix Root Cause** 🔴 CRITICAL
+   - Identify why trigger works in tests but not real signup
+   - Could be timing issue, metadata format, or trigger conditions
+   - Ensure businessName metadata is properly passed to trigger
+
+3. **Add Fallback Safety Net** 🔴 HIGH PRIORITY
+   - Dashboard should handle missing organization gracefully
+   - Auto-create organization if missing (fallback mechanism)
+   - Better error handling and user guidance
+
+4. **Test Complete Flow** 🔴 VALIDATION
+   - Fresh signup → email confirmation → dashboard access
+   - Verify organization creation works end-to-end
+   - Confirm no duplicate business name requests
+
+**Files to Focus On**:
+- `/app/debug-user/page.tsx` - Debug current user state
+- `/supabase/migrations/20250123_fix_organization_creation_trigger.sql` - Trigger logic
+- `/app/(auth)/register/page.tsx` - Registration metadata
+- `/app/(dashboard)/layout.tsx` - Organization query and error handling
+
+---
+
 ## STRATEGIC PIVOT: Multi-Processor Orchestration Platform 🎯
 
 **Vision**: Build the payment orchestration layer that billion-dollar processors can't - enabling businesses to optimize payment routing across multiple processors with intelligent failover, cost optimization, and unified reporting.
