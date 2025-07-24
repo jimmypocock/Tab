@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @jest-environment jsdom
  */
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 
@@ -44,11 +44,11 @@ const mockLogger = {
 
 // Organization service under test
 class OrganizationService {
-  constructor(
-    private db: any,
-    private emailService: any,
-    private logger: any
-  ) {}
+  constructor(db, emailService, logger) {
+    this.db = db
+    this.emailService = emailService
+    this.logger = logger
+  }
 
   async createOrganization(
     userId: string,
@@ -534,7 +534,7 @@ class OrganizationService {
   }
 
   // Private helper methods
-  private generateInviteToken(): string {
+  generateInviteToken() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36)
   }
 }

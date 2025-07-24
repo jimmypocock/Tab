@@ -65,22 +65,23 @@ CREATE POLICY "Allow organization_user creation" ON public.organization_users
     FOR INSERT
     WITH CHECK (true);  -- The trigger handles the security
 
--- Quick check to ensure the user has their organization
-DO $$
-DECLARE
-    test_user_id uuid := 'c2f554b3-f25c-4fb0-bf6f-9268d8a22db0'::uuid;
-    org_count int;
-BEGIN
-    -- Count organizations for the test user
-    SELECT COUNT(*) INTO org_count
-    FROM public.organization_users
-    WHERE user_id = test_user_id;
-    
-    IF org_count = 0 THEN
-        RAISE NOTICE 'Test user has no organizations, running fix...';
-        -- Try to create one
-        PERFORM public.fix_user_organization_access(test_user_id);
-    ELSE
-        RAISE NOTICE 'Test user has % organization(s)', org_count;
-    END IF;
-END $$;
+-- Quick check to ensure the user has their organization (commented out for fresh installs)
+-- This was for a specific user during development, not needed for new databases
+-- DO $$
+-- DECLARE
+--     test_user_id uuid := 'c2f554b3-f25c-4fb0-bf6f-9268d8a22db0'::uuid;
+--     org_count int;
+-- BEGIN
+--     -- Count organizations for the test user
+--     SELECT COUNT(*) INTO org_count
+--     FROM public.organization_users
+--     WHERE user_id = test_user_id;
+--     
+--     IF org_count = 0 THEN
+--         RAISE NOTICE 'Test user has no organizations, running fix...';
+--         -- Try to create one
+--         PERFORM public.fix_user_organization_access(test_user_id);
+--     ELSE
+--         RAISE NOTICE 'Test user has % organization(s)', org_count;
+--     END IF;
+-- END $$;

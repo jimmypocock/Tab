@@ -6,11 +6,13 @@ import {
   invoiceAuditLog,
   tabs,
   lineItems,
+  billingGroups,
   organizations,
   type NewInvoice,
   type NewInvoiceLineItem,
   type Invoice,
   type Tab,
+  type BillingGroup,
 } from '@/lib/db/schema'
 import { eq, and, desc, sql, gte, lte, inArray } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
@@ -25,11 +27,23 @@ export interface CreateInvoiceFromTabOptions {
   tabId: string
   organizationId: string
   lineItemIds?: string[] // If not provided, invoice all items
+  billingGroupId?: string // If provided, invoice only items from this billing group
   dueDate: Date
   paymentTerms?: string
   notes?: string
   billingAddress?: any
   shippingAddress?: any
+}
+
+export interface CreateBillingGroupInvoiceOptions {
+  billingGroupId: string
+  organizationId: string
+  dueDate: Date
+  paymentTerms?: string
+  notes?: string
+  billingAddress?: any
+  shippingAddress?: any
+  includeUnassignedItems?: boolean // Whether to include items not in any billing group
 }
 
 export interface CreateManualInvoiceOptions {
@@ -74,7 +88,7 @@ export class InvoiceService {
 
   // Create invoice from tab
   static async createInvoiceFromTab(options: CreateInvoiceFromTabOptions): Promise<Invoice> {
-    const { tabId, organizationId, lineItemIds, dueDate, paymentTerms, notes, billingAddress, shippingAddress } = options
+    const { tabId, organizationId, lineItemIds, billingGroupId, dueDate, paymentTerms, notes, billingAddress, shippingAddress } = options
     
     // Get tab with line items and customer targeting info
     const tabQuery = await db.query.tabs.findFirst({
@@ -97,10 +111,17 @@ export class InvoiceService {
     
     const tab = tabQuery
     
-    // Filter line items if specific ones requested
+    // Filter line items based on provided criteria
     let tabLineItems = tab.lineItems || []
+    
+    // Filter by specific line item IDs if provided
     if (lineItemIds && lineItemIds.length > 0) {
       tabLineItems = tabLineItems.filter(item => lineItemIds.includes(item.id))
+    }
+    
+    // Filter by billing group if provided
+    if (billingGroupId) {
+      tabLineItems = tabLineItems.filter(item => item.billingGroupId === billingGroupId)
     }
     
     if (tabLineItems.length === 0) {
@@ -110,6 +131,43 @@ export class InvoiceService {
     // Get customer targeting info for effective billing email
     const customerTargeting = await CustomerTargetingService.getCustomerTargeting(tab)
     const billingContext = CustomerTargetingService.getBillingContext(customerTargeting)
+    
+    // Get billing group info if filtering by specific group
+    let billingGroupInfo = null
+    if (billingGroupId) {
+      const billingGroup = await db.query.billingGroups.findFirst({
+        where: eq(billingGroups.id, billingGroupId),
+        with: {
+          payerOrganization: {
+            columns: {
+              id: true,
+              name: true,
+              billingEmail: true,
+            }
+          }
+        }
+      })
+      
+      if (billingGroup) {
+        billingGroupInfo = {
+          id: billingGroup.id,
+          name: billingGroup.name,
+          groupType: billingGroup.groupType,
+          payerEmail: billingGroup.payerEmail,
+          payerOrganization: billingGroup.payerOrganization,
+          poNumber: billingGroup.poNumber,
+          authorizationCode: billingGroup.authorizationCode,
+        }
+        
+        // Use billing group payer info if available
+        if (billingGroup.payerEmail) {
+          customerTargeting.effectiveBillingEmail = billingGroup.payerEmail
+        }
+        if (billingGroup.payerOrganization?.name) {
+          customerTargeting.customerName = billingGroup.payerOrganization.name
+        }
+      }
+    }
     
     // Generate invoice number and public URL
     const invoiceNumber = await this.generateInvoiceNumber(organizationId)
@@ -136,6 +194,9 @@ export class InvoiceService {
           department: tab.department,
           costCenter: tab.costCenter,
           customerTargeting: billingContext, // Store targeting context for reference
+          ...(billingGroupInfo && {
+            billingGroup: billingGroupInfo, // Store billing group context
+          }),
         },
         billingAddress,
         shippingAddress,
@@ -578,5 +639,191 @@ export class InvoiceService {
       organization: invoiceData[0].organization,
       lineItems,
     }
+  }
+
+  // Create invoice specifically for a billing group
+  static async createBillingGroupInvoice(options: CreateBillingGroupInvoiceOptions): Promise<Invoice> {
+    const { billingGroupId, organizationId, dueDate, paymentTerms, notes, billingAddress, shippingAddress, includeUnassignedItems = false } = options
+    
+    // Get billing group with its tab and line items
+    const billingGroup = await db.query.billingGroups.findFirst({
+      where: eq(billingGroups.id, billingGroupId),
+      with: {
+        tab: {
+          with: {
+            lineItems: true,
+          }
+        },
+        payerOrganization: {
+          columns: {
+            id: true,
+            name: true,
+            billingEmail: true,
+          }
+        }
+      }
+    })
+    
+    if (!billingGroup) {
+      throw new Error('Billing group not found')
+    }
+    
+    if (!billingGroup.tab) {
+      throw new Error('Billing group is not associated with a tab')
+    }
+    
+    // Filter line items for this billing group
+    let invoiceLineItems = billingGroup.tab.lineItems.filter(item => 
+      item.billingGroupId === billingGroupId
+    )
+    
+    // Optionally include unassigned items
+    if (includeUnassignedItems) {
+      const unassignedItems = billingGroup.tab.lineItems.filter(item => 
+        !item.billingGroupId
+      )
+      invoiceLineItems = [...invoiceLineItems, ...unassignedItems]
+    }
+    
+    if (invoiceLineItems.length === 0) {
+      throw new Error('No line items found for this billing group')
+    }
+    
+    // Determine customer info from billing group or tab
+    const customerEmail = billingGroup.payerEmail || billingGroup.tab.customerEmail
+    const customerName = billingGroup.payerOrganization?.name || billingGroup.tab.customerName
+    const customerOrgId = billingGroup.payerOrganizationId || billingGroup.tab.customerOrganizationId
+    
+    // Generate invoice number and public URL
+    const invoiceNumber = await this.generateInvoiceNumber(organizationId)
+    const publicUrl = `inv_${generatePublicId()}`
+    
+    // Create invoice with billing group context
+    const [invoice] = await db
+      .insert(invoices)
+      .values({
+        organizationId,
+        tabId: billingGroup.tab.id,
+        invoiceNumber,
+        customerEmail,
+        customerName,
+        customerOrganizationId: customerOrgId,
+        dueDate,
+        issueDate: new Date(),
+        currency: billingGroup.tab.currency,
+        paymentTerms,
+        publicUrl,
+        purchaseOrderNumber: billingGroup.poNumber || billingGroup.tab.purchaseOrderNumber,
+        metadata: {
+          notes,
+          department: billingGroup.tab.department,
+          costCenter: billingGroup.tab.costCenter,
+          billingGroup: {
+            id: billingGroup.id,
+            name: billingGroup.name,
+            groupType: billingGroup.groupType,
+            payerEmail: billingGroup.payerEmail,
+            payerOrganization: billingGroup.payerOrganization,
+            poNumber: billingGroup.poNumber,
+            authorizationCode: billingGroup.authorizationCode,
+            includeUnassignedItems,
+          },
+        },
+        billingAddress,
+        shippingAddress,
+      })
+      .returning()
+    
+    // Create invoice line items with billing group assignment
+    const invoiceLineItemsData: NewInvoiceLineItem[] = invoiceLineItems.map((item, index) => ({
+      invoiceId: invoice.id,
+      lineNumber: index + 1,
+      description: item.description,
+      quantity: item.quantity.toString(),
+      unitPrice: item.unitPrice,
+      sourceType: 'tab_item' as const,
+      sourceId: item.id,
+      billingGroupId: item.billingGroupId, // Preserve billing group assignment
+      metadata: {
+        ...item.metadata,
+        originalBillingGroupId: item.billingGroupId,
+        wasUnassigned: !item.billingGroupId,
+      },
+    }))
+    
+    await db.insert(invoiceLineItems).values(invoiceLineItemsData)
+    
+    // Update the billing group to reference this invoice
+    await db
+      .update(billingGroups)
+      .set({ 
+        invoiceId: invoice.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(billingGroups.id, billingGroupId))
+    
+    // Log creation with billing group context
+    await this.logAudit({
+      invoiceId: invoice.id,
+      action: 'created',
+      changedBy: organizationId,
+      changedByType: 'organization',
+      newData: { 
+        invoice, 
+        lineItems: invoiceLineItemsData,
+        billingGroupId,
+        billingGroupName: billingGroup.name,
+      },
+    })
+    
+    logger.info('Billing group invoice created', {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      billingGroupId,
+      billingGroupName: billingGroup.name,
+      lineItemsCount: invoiceLineItems.length,
+      organizationId,
+    })
+    
+    return invoice
+  }
+
+  // Get all billing groups that can be invoiced for a tab
+  static async getInvoicableBillingGroups(tabId: string, organizationId: string) {
+    const billingGroupsQuery = await db.query.billingGroups.findMany({
+      where: and(
+        eq(billingGroups.tabId, tabId),
+        eq(billingGroups.status, 'active')
+      ),
+      with: {
+        lineItems: true,
+        payerOrganization: {
+          columns: {
+            id: true,
+            name: true,
+            billingEmail: true,
+          }
+        }
+      }
+    })
+    
+    // Filter groups that have line items and haven't been invoiced yet
+    return billingGroupsQuery.filter(group => 
+      group.lineItems.length > 0 && !group.invoiceId
+    ).map(group => ({
+      id: group.id,
+      name: group.name,
+      groupType: group.groupType,
+      status: group.status,
+      payerEmail: group.payerEmail,
+      payerOrganization: group.payerOrganization,
+      poNumber: group.poNumber,
+      authorizationCode: group.authorizationCode,
+      lineItemsCount: group.lineItems.length,
+      totalAmount: group.lineItems.reduce((sum, item) => 
+        sum + (parseFloat(item.unitPrice) * item.quantity), 0
+      ),
+      canInvoice: true,
+    }))
   }
 }

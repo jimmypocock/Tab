@@ -11,6 +11,7 @@ import { logger } from '@/lib/logger'
 // Create invoice validation schema
 const createInvoiceSchema = z.object({
   tabId: z.string().uuid().optional(),
+  billingGroupId: z.string().uuid().optional(), // Support billing group invoices
   lineItemIds: z.array(z.string().uuid()).optional(),
   customerEmail: z.string().email().optional(),
   customerName: z.string().optional(),
@@ -67,11 +68,12 @@ export async function POST(request: NextRequest) {
       let invoice
 
       if (validatedData.tabId) {
-        // Create invoice from tab
+        // Create invoice from tab (with optional billing group filtering)
         invoice = await InvoiceService.createInvoiceFromTab({
           tabId: validatedData.tabId,
           organizationId: context.organizationId,
           lineItemIds: validatedData.lineItemIds,
+          billingGroupId: validatedData.billingGroupId, // Pass billing group filter
           dueDate: validatedData.dueDate,
           paymentTerms: validatedData.paymentTerms,
           notes: validatedData.notes,

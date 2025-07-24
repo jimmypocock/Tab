@@ -1,4 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { render } from '@/__tests__/helpers/test-utils'
 import { useRouter, useSearchParams } from 'next/navigation'
 import RegisterPage from '@/app/(auth)/register/page'
 import LoginPage from '@/app/(auth)/login/page'
@@ -11,66 +12,71 @@ jest.mock('next/navigation', () => ({
   useSearchParams: jest.fn(),
 }))
 
-// Mock Supabase client
-jest.mock('@/lib/supabase/client', () => ({
-  createClient: jest.fn(),
-}))
-
-// Create mock location functions
-const mockAssign = jest.fn()
-const mockReplace = jest.fn() 
-const mockReload = jest.fn()
-
-// Store original location
-const originalLocation = window.location
-
-// Replace window.location with a mock
-beforeAll(() => {
-  // @ts-ignore
-  delete window.location
-  
-  // Create a mock location object with proper href tracking
-  const mockLocation = {
-    href: 'http://localhost',
-    protocol: 'http:',
-    host: 'localhost',
-    hostname: 'localhost',
-    port: '',
-    pathname: '/',
-    search: '',
-    hash: '',
-    assign: mockAssign,
-    replace: mockReplace,
-    reload: mockReload,
+// Mock Supabase client with proper auth methods
+const mockSupabaseClient = {
+  auth: {
+    getUser: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    signUp: jest.fn().mockResolvedValue({ 
+      data: { user: { id: 'user123', email: 'test@example.com' } }, 
+      error: null 
+    }),
+    signInWithPassword: jest.fn().mockResolvedValue({ 
+      data: { user: { id: 'user123', email: 'test@example.com' } }, 
+      error: null 
+    }),
+    signOut: jest.fn().mockResolvedValue({ error: null }),
+    onAuthStateChange: jest.fn(() => ({
+      data: { subscription: { unsubscribe: jest.fn() } }
+    }))
   }
+}
 
-  // @ts-ignore
-  window.location = mockLocation
-})
-
-afterAll(() => {
-  // @ts-ignore
-  window.location = originalLocation
-})
+jest.mock('@/lib/supabase/client', () => ({
+  createClient: jest.fn(() => mockSupabaseClient),
+}))
 
 describe('Registration Flow', () => {
   const mockPush = jest.fn()
   const mockRefresh = jest.fn()
-  const mockSupabase = {
-    auth: {
-      signUp: jest.fn(),
-      signInWithPassword: jest.fn(),
-      verifyOtp: jest.fn(),
-    },
-    from: jest.fn(),
-  }
+
+  // Mock window.location.href assignment to prevent JSDOM navigation errors
+  beforeAll(() => {
+    // Delete the existing location property first
+    delete (window as any).location
+    
+    // Create a custom location object with a non-throwing href setter
+    const mockLocation = {
+      href: 'http://localhost/',
+      origin: 'http://localhost',
+      protocol: 'http:',
+      host: 'localhost',
+      hostname: 'localhost',
+      port: '',
+      pathname: '/',
+      search: '',
+      hash: '',
+      assign: jest.fn(),
+      replace: jest.fn(),
+      reload: jest.fn(),
+      toString: () => 'http://localhost/'
+    }
+    
+    // Override the href property with a custom setter
+    Object.defineProperty(mockLocation, 'href', {
+      get: () => 'http://localhost/',
+      set: (value) => {
+        // Silent no-op to prevent JSDOM navigation errors
+        console.log(`Mock navigation to: ${value}`)
+      },
+      configurable: true
+    })
+    
+    // Set the new location object
+    ;(window as any).location = mockLocation
+  })
 
   beforeEach(() => {
     jest.clearAllMocks()
-    // Reset window.location.href
-    if (window.location) {
-      (window.location as any).href = ''
-    }
     ;(useRouter as jest.Mock).mockReturnValue({
       push: mockPush,
       refresh: mockRefresh,
@@ -78,7 +84,7 @@ describe('Registration Flow', () => {
     ;(useSearchParams as jest.Mock).mockReturnValue({
       get: jest.fn().mockReturnValue(null),
     })
-    ;(createClient as jest.Mock).mockReturnValue(mockSupabase)
+    ;(createClient as jest.Mock).mockReturnValue(mockSupabaseClient)
   })
 
   describe('RegisterPage', () => {
@@ -92,7 +98,7 @@ describe('Registration Flow', () => {
     })
 
     it('handles successful registration', async () => {
-      mockSupabase.auth.signUp.mockResolvedValueOnce({
+      mockSupabaseClient.auth.signUp.mockResolvedValueOnce({
         data: {
           user: {
             id: 'test-user-id',
@@ -117,21 +123,21 @@ describe('Registration Flow', () => {
       fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 
       await waitFor(() => {
-        expect(mockSupabase.auth.signUp).toHaveBeenCalledWith({
+        expect(mockSupabaseClient.auth.signUp).toHaveBeenCalledWith({
           email: 'test@example.com',
           password: 'password123',
           options: {
             data: {
-              business_name: 'Test Business',
+              businessName: 'Test Business',
             },
           },
         })
-        expect(mockPush).toHaveBeenCalledWith('/confirm-email')
+        expect(mockPush).toHaveBeenCalledWith('/confirm-email?email=test%40example.com')
       })
     })
 
     it('displays error on registration failure', async () => {
-      mockSupabase.auth.signUp.mockResolvedValueOnce({
+      mockSupabaseClient.auth.signUp.mockResolvedValueOnce({
         data: null,
         error: { message: 'User already exists' },
       })
@@ -194,7 +200,7 @@ describe('Registration Flow', () => {
     })
 
     it('handles successful login', async () => {
-      mockSupabase.auth.signInWithPassword.mockResolvedValueOnce({
+      mockSupabaseClient.auth.signInWithPassword.mockResolvedValueOnce({
         data: { user: { id: 'test-user-id' } },
         error: null,
       })
@@ -211,18 +217,18 @@ describe('Registration Flow', () => {
       fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
 
       await waitFor(() => {
-        expect(mockSupabase.auth.signInWithPassword).toHaveBeenCalledWith({
+        expect(mockSupabaseClient.auth.signInWithPassword).toHaveBeenCalledWith({
           email: 'test@example.com',
           password: 'password123',
         })
         // The login form should disappear after successful login
         // (In reality, window.location.href would redirect to /dashboard)
-        expect(mockSupabase.auth.signInWithPassword).toHaveBeenCalled()
+        expect(mockSupabaseClient.auth.signInWithPassword).toHaveBeenCalled()
       })
     })
 
     it('displays error for unconfirmed email', async () => {
-      mockSupabase.auth.signInWithPassword.mockResolvedValueOnce({
+      mockSupabaseClient.auth.signInWithPassword.mockResolvedValueOnce({
         data: null,
         error: { message: 'Email not confirmed' },
       })

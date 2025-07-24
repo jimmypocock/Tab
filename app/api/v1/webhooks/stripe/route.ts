@@ -45,8 +45,9 @@ export async function POST(request: NextRequest) {
           amountTotal: session.amount_total,
         })
         
-        // Get tab info from metadata
-        const tabId = session.metadata?.tabId
+        // Get tab and billing group info from metadata
+        const tabId = session.metadata?.tab_id || session.metadata?.tabId  // Support both formats
+        const billingGroupId = session.metadata?.billing_group_id
         const amount = session.metadata?.amount || (session.amount_total ? session.amount_total / 100 : 0)
         
         if (!tabId) {
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
         
         logger.info('Creating payment record', {
           tabId,
+          billingGroupId,
           amount,
           paymentIntentId,
         })
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
           .insert(payments)
           .values({
             tabId,
+            billingGroupId: billingGroupId || null,
             amount: amount.toString(),
             currency: session.currency?.toUpperCase() || 'USD',
             status: 'succeeded',
@@ -80,6 +83,11 @@ export async function POST(request: NextRequest) {
             metadata: {
               stripe_event_id: event.id,
               checkout_session_id: session.id,
+              ...(billingGroupId && {
+                billing_group_id: billingGroupId,
+                billing_group_name: session.metadata?.billing_group_name,
+                billing_group_type: session.metadata?.billing_group_type,
+              }),
             },
           })
           .returning()
@@ -90,42 +98,17 @@ export async function POST(request: NextRequest) {
         
         logger.info('Payment record created', {
           paymentId: payment.id,
-          tabId: payment.tabId
+          tabId: payment.tabId,
+          billingGroupId: payment.billingGroupId
         })
         
-        // Update tab paid amount
-        const tab = await db.query.tabs.findFirst({
-          where: (tabs, { eq }) => eq(tabs.id, tabId),
+        // Tab and billing group balances are automatically updated via database triggers
+        logger.info('Payment processed successfully - balances will be updated automatically', {
+          paymentId: payment.id,
+          tabId: payment.tabId,
+          billingGroupId: payment.billingGroupId,
+          amount: payment.amount
         })
-        
-        if (tab) {
-          const newPaidAmount = parseFloat(tab.paidAmount) + parseFloat(payment.amount)
-          const newStatus = newPaidAmount >= parseFloat(tab.totalAmount) ? 'paid' : 'partial'
-          
-          logger.info('Updating tab', {
-            tabId: tab.id,
-            oldPaidAmount: tab.paidAmount,
-            newPaidAmount,
-            newStatus,
-          })
-          
-          await db
-            .update(tabs)
-            .set({
-              paidAmount: newPaidAmount.toFixed(2),
-              status: newStatus,
-              updatedAt: new Date(),
-            })
-            .where(eq(tabs.id, tab.id))
-            
-          logger.info('Tab updated successfully', {
-            tabId: tab.id
-          })
-        } else {
-          logger.error('Tab not found', undefined, {
-            tabId
-          })
-        }
         break
       }
       

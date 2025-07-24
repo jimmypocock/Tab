@@ -9,7 +9,7 @@ export enum LogLevel {
 
 interface LogContext {
   requestId?: string
-  merchantId?: string
+  organizationId?: string
   tabId?: string
   userId?: string
   apiKey?: string

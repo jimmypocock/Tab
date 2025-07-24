@@ -1,76 +1,107 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { withApiAuth } from '@/lib/api/middleware'
+import { NextRequest } from 'next/server'
+import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
+import { parseJsonBody } from '@/lib/api/middleware'
+import { createInvoiceSchema, validateInput } from '@/lib/api/validation'
 import { InvoiceService } from '@/lib/services/invoice.service'
+import { 
+  ApiResponseBuilder,
+  createSuccessResponse 
+} from '@/lib/api/response'
+import { 
+  NotFoundError,
+  ValidationError,
+  DatabaseError
+} from '@/lib/errors'
 import { logger } from '@/lib/logger'
 
-interface RouteParams {
-  params: Promise<{ id: string }>
+// Create invoice for a tab (with optional billing group filtering)
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
+    const tabId = params.id
+    
+    try {
+      // Parse and validate request body
+      const body = await parseJsonBody(req)
+      
+      const validation = validateInput(createInvoiceSchema, {
+        ...body,
+        tabId, // Inject tab ID from URL
+      })
+      
+      if (!validation.success) {
+        throw new ValidationError('Invalid request data', validation.error.issues)
+      }
+
+      const data = validation.data
+
+      // Create invoice from tab
+      const invoice = await InvoiceService.createInvoiceFromTab({
+        tabId,
+        organizationId: context.organizationId,
+        lineItemIds: data.lineItemIds,
+        billingGroupId: data.billingGroupId, // Support billing group filtering
+        dueDate: new Date(data.dueDate),
+        paymentTerms: data.paymentTerms,
+        notes: data.notes,
+        billingAddress: data.billingAddress,
+        shippingAddress: data.shippingAddress,
+      })
+
+      // Send invoice immediately if requested
+      if (data.sendImmediately) {
+        try {
+          await InvoiceService.sendInvoice(invoice.id, {
+            message: data.notes,
+          })
+          
+          logger.info('Tab invoice sent immediately', {
+            invoiceId: invoice.id,
+            tabId,
+            billingGroupId: data.billingGroupId,
+            organizationId: context.organizationId,
+          })
+        } catch (sendError) {
+          logger.warn('Failed to send invoice immediately', {
+            invoiceId: invoice.id,
+            tabId,
+            error: sendError,
+          })
+          // Don't fail the invoice creation if sending fails
+        }
+      }
+
+      return new ApiResponseBuilder()
+        .setData({
+          invoice,
+          message: data.sendImmediately 
+            ? 'Invoice created and sent successfully'
+            : 'Invoice created successfully'
+        })
+        .setStatusCode(201)
+        .build()
+        
+    } catch (error) {
+      if (error instanceof NotFoundError || 
+          error instanceof ValidationError) {
+        throw error
+      }
+      
+      logger.error('Failed to create tab invoice', error as Error, {
+        tabId,
+        organizationId: context.organizationId,
+      })
+      
+      throw new DatabaseError('Failed to create tab invoice', error)
+    }
+  }, {
+    requiredScope: 'merchant'
+  })
 }
 
-// Generate invoice for a tab
-export const POST = withApiAuth(async (
-  request: NextRequest,
-  context: { params: Promise<{ id: string }>; merchantId: string }
-): Promise<NextResponse> => {
-  try {
-    const { id: tabId } = await context.params
-    const { merchantId } = context
-
-    // Generate invoice
-    const invoice = await InvoiceService.generateInvoice(tabId, merchantId)
-
-    // Optionally send immediately based on query param
-    const url = new URL(request.url)
-    const sendImmediately = url.searchParams.get('send') === 'true'
-
-    if (sendImmediately) {
-      // Get recipient emails from request body
-      const body = await request.json().catch(() => ({}))
-      const { recipientEmail, ccEmails } = body
-      
-      await InvoiceService.sendInvoice(invoice.id, merchantId, recipientEmail, ccEmails)
-      
-      logger.info('Invoice generated and sent', { 
-        tabId, 
-        invoiceId: invoice.id,
-        merchantId,
-        recipientEmail: recipientEmail || 'default',
-        ccCount: ccEmails?.length || 0
-      })
-
-      return NextResponse.json({
-        success: true,
-        invoice,
-        sent: true,
-        message: 'Invoice generated and sent successfully'
-      })
-    }
-
-    logger.info('Invoice generated', { 
-      tabId, 
-      invoiceId: invoice.id,
-      merchantId 
-    })
-
-    return NextResponse.json({
-      success: true,
-      invoice,
-      sent: false,
-      message: 'Invoice generated successfully'
-    })
-  } catch (error: any) {
-    logger.error('Failed to generate invoice', error)
-    
-    if (error.message === 'Tab not found') {
-      return NextResponse.json(
-        { error: 'Tab not found' },
-        { status: 404 }
-      )
-    }
-
-    return NextResponse.json(
-      { error: 'Failed to generate invoice' },
-      { status: 500 }
-    )
-  }
-})
+// Handle OPTIONS for CORS
+export async function OPTIONS(_request: NextRequest) {
+  return createSuccessResponse({}, undefined, 204)
+}

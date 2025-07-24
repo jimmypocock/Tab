@@ -57,11 +57,11 @@ describe('Email Confirmation Route', () => {
     })
 
     expect(NextResponse.redirect).toHaveBeenCalledWith(
-      new URL('/dashboard', 'http://localhost:1235/auth/confirm')
+      new URL('/email-confirmed', 'http://localhost:1235/auth/confirm')
     )
   })
 
-  it('redirects to custom next URL if provided', async () => {
+  it('redirects to email-confirmed page regardless of next param', async () => {
     mockSupabase.auth.verifyOtp.mockResolvedValueOnce({
       data: { user: { id: 'test-user-id' } },
       error: null,
@@ -73,8 +73,9 @@ describe('Email Confirmation Route', () => {
 
     await GET(request)
 
+    // The route now always redirects to email-confirmed, ignoring the next param
     expect(NextResponse.redirect).toHaveBeenCalledWith(
-      new URL('/settings', 'http://localhost:1235/auth/confirm')
+      new URL('/email-confirmed', 'http://localhost:1235/auth/confirm')
     )
   })
 

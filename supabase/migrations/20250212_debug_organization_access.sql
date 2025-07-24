@@ -212,9 +212,10 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
--- Quick test/fix for the specific user
-DO $$
-BEGIN
-    -- Fix the specific user mentioned in the error
-    PERFORM public.fix_user_organization_access('c2f554b3-f25c-4fb0-bf6f-9268d8a22db0'::uuid);
-END $$;
+-- Quick test/fix for the specific user (commented out for fresh installs)
+-- This was for a specific user during development, not needed for new databases
+-- DO $$
+-- BEGIN
+--     -- Fix the specific user mentioned in the error
+--     PERFORM public.fix_user_organization_access('c2f554b3-f25c-4fb0-bf6f-9268d8a22db0'::uuid);
+-- END $$;

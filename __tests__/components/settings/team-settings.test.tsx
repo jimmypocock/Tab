@@ -1,13 +1,14 @@
 import { render, screen, fireEvent, waitFor } from '@/__tests__/helpers/test-utils'
 import userEvent from '@testing-library/user-event'
 import TeamSettingsPage from '@/app/(dashboard)/settings/team/page'
-import { useOrganization } from '@/components/dashboard/organization-provider'
 import * as teamActions from '@/app/(dashboard)/settings/team/actions'
 
-// Mock the organization provider
-jest.mock('@/components/dashboard/organization-provider', () => ({
+// Mock the organization context
+jest.mock('@/components/dashboard/organization-context', () => ({
   useOrganization: jest.fn()
 }))
+
+import { useOrganization } from '@/components/dashboard/organization-context'
 
 // Mock the server actions
 jest.mock('@/app/(dashboard)/settings/team/actions', () => ({
@@ -62,7 +63,8 @@ describe('TeamSettingsPage', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    ;(useOrganization as jest.MockedFunction<typeof useOrganization>).mockReturnValue({
+    const { useOrganization } = require('@/components/dashboard/organization-context')
+    useOrganization.mockReturnValue({
       currentOrganization: mockOrganization,
       userRole: 'owner',
       organizations: [mockOrganization],

@@ -12,6 +12,7 @@ export function setupMocks() {
     gte: jest.fn((field, value) => ({ type: 'gte', field, value })),
     lte: jest.fn((field, value) => ({ type: 'lte', field, value })),
     like: jest.fn((field, value) => ({ type: 'like', field, value })),
+    inArray: jest.fn((field, values) => ({ type: 'inArray', field, values })),
     sql: jest.fn(),
     relations: jest.fn(() => ({})),
   }))

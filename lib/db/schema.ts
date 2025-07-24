@@ -5,7 +5,6 @@ import { relations, sql } from 'drizzle-orm'
 export const processorTypeEnum = pgEnum('processor_type', ['stripe', 'square', 'paypal', 'authorize_net'])
 export const organizationTypeEnum = pgEnum('organization_type', ['business', 'individual', 'platform'])
 export const organizationRoleEnum = pgEnum('organization_role', ['owner', 'admin', 'member', 'viewer'])
-export const merchantRoleEnum = pgEnum('merchant_role', ['owner', 'admin', 'member', 'viewer']) // Legacy enum for migration
 export const memberStatusEnum = pgEnum('member_status', ['active', 'suspended', 'pending_invitation'])
 export const relationshipStatusEnum = pgEnum('relationship_status', ['active', 'suspended', 'closed'])
 
@@ -23,53 +22,17 @@ export const users = pgTable('users', {
 })
 
 export const usersRelations = relations(users, ({ many }) => ({
-  merchantUsers: many(merchantUsers),
   organizationUsers: many(organizationUsers),
   userSessions: many(userSessions),
-  createdMerchants: many(merchants, { relationName: 'createdMerchants' }),
   createdOrganizations: many(organizations, { relationName: 'createdOrganizations' }),
-  invitedUsers: many(merchantUsers, { relationName: 'invitedUsers' }),
   invitedOrgUsers: many(organizationUsers, { relationName: 'invitedOrgUsers' }),
 }))
 
-// Many-to-many relationship between users and merchants
-export const merchantUsers = pgTable('merchant_users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').notNull().references(() => merchants.id, { onDelete: 'cascade' }),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  role: merchantRoleEnum('role').notNull().default('member'),
-  permissions: jsonb('permissions').default('{}'),
-  invitedBy: uuid('invited_by').references(() => users.id),
-  invitedAt: timestamp('invited_at'),
-  joinedAt: timestamp('joined_at').defaultNow(),
-  status: memberStatusEnum('status').notNull().default('active'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  uniqueMerchantUser: uniqueIndex('unique_merchant_user').on(table.merchantId, table.userId),
-}))
-
-export const merchantUsersRelations = relations(merchantUsers, ({ one }) => ({
-  merchant: one(merchants, {
-    fields: [merchantUsers.merchantId],
-    references: [merchants.id],
-  }),
-  user: one(users, {
-    fields: [merchantUsers.userId], 
-    references: [users.id],
-  }),
-  invitedByUser: one(users, {
-    fields: [merchantUsers.invitedBy],
-    references: [users.id],
-    relationName: 'invitedUsers',
-  }),
-}))
 
 // User sessions for context tracking
 export const userSessions = pgTable('user_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  currentMerchantId: uuid('current_merchant_id').references(() => merchants.id), // Legacy
   currentOrganizationId: uuid('current_organization_id').references(() => organizations.id),
   currentContext: text('current_context').default('merchant'), // 'merchant' or 'corporate'
   sessionData: jsonb('session_data').default('{}'),
@@ -83,39 +46,12 @@ export const userSessionsRelations = relations(userSessions, ({ one }) => ({
     fields: [userSessions.userId],
     references: [users.id],
   }),
-  currentMerchant: one(merchants, {
-    fields: [userSessions.currentMerchantId],
-    references: [merchants.id],
-  }),
   currentOrganization: one(organizations, {
     fields: [userSessions.currentOrganizationId],
     references: [organizations.id],
   }),
 }))
 
-export const merchants = pgTable('merchants', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: text('email').unique(), // Will be deprecated/removed
-  businessName: text('business_name').notNull(),
-  createdBy: uuid('created_by').references(() => users.id),
-  slug: text('slug').unique(),
-  settings: jsonb('settings').default('{}'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-})
-
-export const merchantsRelations = relations(merchants, ({ many, one }) => ({
-  apiKeys: many(apiKeys),
-  tabs: many(tabs),
-  processors: many(merchantProcessors),
-  merchantUsers: many(merchantUsers),
-  userSessions: many(userSessions),
-  creator: one(users, {
-    fields: [merchants.createdBy],
-    references: [users.id],
-    relationName: 'createdMerchants',
-  }),
-}))
 
 // Organizations table (unified merchants and corporate accounts)
 export const organizations = pgTable('organizations', {
@@ -144,6 +80,9 @@ export const organizations = pgTable('organizations', {
   settings: jsonb('settings').default('{}'),
   metadata: jsonb('metadata').default('{}'),
   
+  // Features and monetization
+  features: jsonb('features').default('{}'),
+  
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -164,6 +103,7 @@ export const organizationsRelations = relations(organizations, ({ many, one }) =
     fields: [organizations.createdBy],
     references: [users.id],
   }),
+  activity: many(organizationActivity),
 }))
 
 // Organization users (many-to-many between users and organizations)
@@ -257,8 +197,7 @@ export const organizationRelationshipsRelations = relations(organizationRelation
 
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').references(() => merchants.id), // Legacy, will be removed
-  organizationId: uuid('organization_id').references(() => organizations.id),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   keyHash: text('key_hash').notNull(),
   keyPrefix: text('key_prefix').notNull(), // First 8 chars of key for identification
   name: text('name'),
@@ -266,15 +205,17 @@ export const apiKeys = pgTable('api_keys', {
   permissions: jsonb('permissions').default('{}'),
   lastUsedAt: timestamp('last_used_at'),
   isActive: boolean('is_active').default(true).notNull(),
+  revokedAt: timestamp('revoked_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, (table) => ({
+  organizationIdx: index('idx_api_keys_organization').on(table.organizationId),
+  keyPrefixIdx: index('idx_api_keys_key_prefix').on(table.keyPrefix),
+  scopeIdx: index('idx_api_keys_scope').on(table.scope),
+  isActiveIdx: index('idx_api_keys_is_active').on(table.isActive),
+}))
 
 export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
-  merchant: one(merchants, {
-    fields: [apiKeys.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [apiKeys.organizationId],
     references: [organizations.id],
@@ -287,8 +228,7 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 
 export const tabs = pgTable('tabs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').notNull().references(() => merchants.id), // Legacy, will be removed
-  organizationId: uuid('organization_id').references(() => organizations.id),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   
   // Customer targeting - flexible for individuals or organizations
   customerEmail: text('customer_email'), // Required for individuals, optional override for orgs
@@ -306,9 +246,7 @@ export const tabs = pgTable('tabs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   // Corporate/Organization payment fields
-  corporateAccountId: uuid('corporate_account_id').references(() => corporateAccounts.id), // Legacy
   paidByOrgId: uuid('paid_by_org_id').references(() => organizations.id),
-  corporateRelationshipId: uuid('corporate_relationship_id').references(() => corporateMerchantRelationships.id), // Legacy
   relationshipId: uuid('relationship_id').references(() => organizationRelationships.id),
   purchaseOrderNumber: text('purchase_order_number'),
   department: text('department'),
@@ -316,10 +254,6 @@ export const tabs = pgTable('tabs', {
 })
 
 export const tabsRelations = relations(tabs, ({ one, many }) => ({
-  merchant: one(merchants, {
-    fields: [tabs.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [tabs.organizationId],
     references: [organizations.id],
@@ -331,17 +265,9 @@ export const tabsRelations = relations(tabs, ({ one, many }) => ({
   lineItems: many(lineItems),
   payments: many(payments),
   invoices: many(invoices),
-  corporateAccount: one(corporateAccounts, {
-    fields: [tabs.corporateAccountId],
-    references: [corporateAccounts.id],
-  }),
   paidByOrg: one(organizations, {
     fields: [tabs.paidByOrgId],
     references: [organizations.id],
-  }),
-  corporateRelationship: one(corporateMerchantRelationships, {
-    fields: [tabs.corporateRelationshipId],
-    references: [corporateMerchantRelationships.id],
   }),
   relationship: one(organizationRelationships, {
     fields: [tabs.relationshipId],
@@ -356,21 +282,26 @@ export const lineItems = pgTable('line_items', {
   quantity: integer('quantity').notNull().default(1),
   unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
   total: decimal('total', { precision: 10, scale: 2 }).notNull(),
+  billingGroupId: uuid('billing_group_id').references(() => billingGroups.id),
   metadata: json('metadata'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
-export const lineItemsRelations = relations(lineItems, ({ one }) => ({
+export const lineItemsRelations = relations(lineItems, ({ one, many }) => ({
   tab: one(tabs, {
     fields: [lineItems.tabId],
     references: [tabs.id],
   }),
+  billingGroup: one(billingGroups, {
+    fields: [lineItems.billingGroupId],
+    references: [billingGroups.id],
+  }),
+  overrides: many(billingGroupOverrides),
 }))
 
 export const merchantProcessors = pgTable('merchant_processors', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').references(() => merchants.id, { onDelete: 'cascade' }), // Legacy
-  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   processorType: text('processor_type').notNull(), // 'stripe', 'square', 'paypal', 'authorize_net'
   isActive: boolean('is_active').default(true).notNull(),
   isTestMode: boolean('is_test_mode').default(true).notNull(),
@@ -382,10 +313,6 @@ export const merchantProcessors = pgTable('merchant_processors', {
 })
 
 export const merchantProcessorsRelations = relations(merchantProcessors, ({ one, many }) => ({
-  merchant: one(merchants, {
-    fields: [merchantProcessors.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [merchantProcessors.organizationId],
     references: [organizations.id],
@@ -396,6 +323,7 @@ export const merchantProcessorsRelations = relations(merchantProcessors, ({ one,
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   tabId: uuid('tab_id').notNull().references(() => tabs.id),
+  billingGroupId: uuid('billing_group_id').references(() => billingGroups.id),
   processorId: uuid('processor_id').references(() => merchantProcessors.id),
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   currency: text('currency').notNull().default('USD'),
@@ -412,165 +340,24 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
     fields: [payments.tabId],
     references: [tabs.id],
   }),
+  billingGroup: one(billingGroups, {
+    fields: [payments.billingGroupId],
+    references: [billingGroups.id],
+  }),
   processor: one(merchantProcessors, {
     fields: [payments.processorId],
     references: [merchantProcessors.id],
   }),
 }))
 
-// Note: The full professional invoicing schema is defined below after corporate accounts
-
-// Corporate Accounts Tables
-export const corporateAccounts = pgTable('corporate_accounts', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  accountNumber: text('account_number').notNull().unique(),
-  companyName: text('company_name').notNull(),
-  taxId: text('tax_id'),
-  primaryContactEmail: text('primary_contact_email').notNull(),
-  primaryContactName: text('primary_contact_name'),
-  primaryContactPhone: text('primary_contact_phone'),
-  billingAddress: jsonb('billing_address'),
-  metadata: jsonb('metadata').default({}),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => {
-  return {
-    accountNumberIdx: index('idx_corporate_accounts_number').on(table.accountNumber),
-    emailIdx: index('idx_corporate_accounts_email').on(table.primaryContactEmail),
-  }
-})
-
-export const corporateAccountsRelations = relations(corporateAccounts, ({ many }) => ({
-  apiKeys: many(corporateApiKeys),
-  merchantRelationships: many(corporateMerchantRelationships),
-  users: many(corporateAccountUsers),
-  tabs: many(tabs),
-  activity: many(corporateAccountActivity),
-}))
-
-export const corporateApiKeys = pgTable('corporate_api_keys', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  corporateAccountId: uuid('corporate_account_id').notNull().references(() => corporateAccounts.id, { onDelete: 'cascade' }),
-  keyHash: text('key_hash').notNull(),
-  keyPrefix: text('key_prefix').notNull(),
-  description: text('description'),
-  isActive: boolean('is_active').default(true).notNull(),
-  lastUsedAt: timestamp('last_used_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  revokedAt: timestamp('revoked_at'),
-}, (table) => {
-  return {
-    keyPrefixIdx: index('idx_corporate_api_keys_prefix').on(table.keyPrefix),
-    keyHashIdx: index('idx_corporate_api_keys_hash').on(table.keyHash),
-  }
-})
-
-export const corporateApiKeysRelations = relations(corporateApiKeys, ({ one }) => ({
-  corporateAccount: one(corporateAccounts, {
-    fields: [corporateApiKeys.corporateAccountId],
-    references: [corporateAccounts.id],
-  }),
-}))
-
-export const corporateMerchantRelationships = pgTable('corporate_merchant_relationships', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  corporateAccountId: uuid('corporate_account_id').notNull().references(() => corporateAccounts.id, { onDelete: 'cascade' }),
-  merchantId: uuid('merchant_id').notNull().references(() => merchants.id, { onDelete: 'cascade' }),
-  status: text('status').notNull(), // active, suspended, pending_approval
-  creditLimit: decimal('credit_limit', { precision: 10, scale: 2 }),
-  paymentTerms: text('payment_terms'), // NET30, NET60, PREPAID
-  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).default('0'),
-  billingContactEmail: text('billing_contact_email'),
-  billingContactName: text('billing_contact_name'),
-  shippingAddresses: jsonb('shipping_addresses').default([]),
-  customPricing: jsonb('custom_pricing'),
-  metadata: jsonb('metadata').default({}),
-  approvedAt: timestamp('approved_at'),
-  approvedBy: uuid('approved_by').references(() => merchants.id),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => {
-  return {
-    corporateAccountIdx: index('idx_cmr_corporate_account').on(table.corporateAccountId),
-    merchantIdx: index('idx_cmr_merchant').on(table.merchantId),
-    statusIdx: index('idx_cmr_status').on(table.status),
-  }
-})
-
-export const corporateMerchantRelationshipsRelations = relations(corporateMerchantRelationships, ({ one, many }) => ({
-  corporateAccount: one(corporateAccounts, {
-    fields: [corporateMerchantRelationships.corporateAccountId],
-    references: [corporateAccounts.id],
-  }),
-  merchant: one(merchants, {
-    fields: [corporateMerchantRelationships.merchantId],
-    references: [merchants.id],
-  }),
-  tabs: many(tabs),
-}))
-
-export const corporateAccountUsers = pgTable('corporate_account_users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  corporateAccountId: uuid('corporate_account_id').notNull().references(() => corporateAccounts.id, { onDelete: 'cascade' }),
-  email: text('email').notNull(),
-  name: text('name'),
-  role: text('role').notNull(), // admin, purchaser, viewer, approver
-  permissions: jsonb('permissions').default({}),
-  isActive: boolean('is_active').default(true).notNull(),
-  merchantAccess: jsonb('merchant_access').default([]),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-})
-
-export const corporateAccountUsersRelations = relations(corporateAccountUsers, ({ one, many }) => ({
-  corporateAccount: one(corporateAccounts, {
-    fields: [corporateAccountUsers.corporateAccountId],
-    references: [corporateAccounts.id],
-  }),
-  activity: many(corporateAccountActivity),
-}))
-
-export const corporateAccountActivity = pgTable('corporate_account_activity', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  corporateAccountId: uuid('corporate_account_id').notNull().references(() => corporateAccounts.id, { onDelete: 'cascade' }),
-  merchantId: uuid('merchant_id').references(() => merchants.id),
-  userId: uuid('user_id').references(() => corporateAccountUsers.id),
-  action: text('action').notNull(),
-  entityType: text('entity_type'),
-  entityId: uuid('entity_id'),
-  metadata: jsonb('metadata').default({}),
-  ipAddress: inet('ip_address'),
-  userAgent: text('user_agent'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => {
-  return {
-    corporateAccountIdx: index('idx_activity_corporate_account').on(table.corporateAccountId),
-    createdAtIdx: index('idx_activity_created').on(table.createdAt),
-  }
-})
-
-export const corporateAccountActivityRelations = relations(corporateAccountActivity, ({ one }) => ({
-  corporateAccount: one(corporateAccounts, {
-    fields: [corporateAccountActivity.corporateAccountId],
-    references: [corporateAccounts.id],
-  }),
-  merchant: one(merchants, {
-    fields: [corporateAccountActivity.merchantId],
-    references: [merchants.id],
-  }),
-  user: one(corporateAccountUsers, {
-    fields: [corporateAccountActivity.userId],
-    references: [corporateAccountUsers.id],
-  }),
-}))
+// Note: The full professional invoicing schema is defined below
 
 // Professional Invoicing System Tables
 
 // Enhanced invoices table
 export const invoices = pgTable('invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').references(() => merchants.id), // Legacy
-  organizationId: uuid('organization_id').references(() => organizations.id),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   tabId: uuid('tab_id').references(() => tabs.id),
   
   // Invoice identification
@@ -581,7 +368,7 @@ export const invoices = pgTable('invoices', {
   // Customer info
   customerEmail: text('customer_email').notNull(),
   customerName: text('customer_name'),
-  customerId: uuid('customer_id').references(() => corporateAccounts.id),
+  customerOrganizationId: uuid('customer_organization_id').references(() => organizations.id),
   
   // Invoice details
   status: text('status').notNull().default('draft'),
@@ -621,19 +408,15 @@ export const invoices = pgTable('invoices', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => {
   return {
-    merchantStatusIdx: index('idx_invoices_merchant_status').on(table.merchantId, table.status),
+    organizationStatusIdx: index('idx_invoices_organization_status').on(table.organizationId, table.status),
     customerIdx: index('idx_invoices_customer').on(table.customerEmail),
-    customerIdIdx: index('idx_invoices_customer_id').on(table.customerId),
+    customerOrgIdx: index('idx_invoices_customer_org').on(table.customerOrganizationId),
     dueDateIdx: index('idx_invoices_due_date').on(table.dueDate),
     tabIdx: index('idx_invoices_tab').on(table.tabId),
   }
 })
 
 export const invoicesRelations = relations(invoices, ({ one, many }) => ({
-  merchant: one(merchants, {
-    fields: [invoices.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [invoices.organizationId],
     references: [organizations.id],
@@ -642,9 +425,9 @@ export const invoicesRelations = relations(invoices, ({ one, many }) => ({
     fields: [invoices.tabId],
     references: [tabs.id],
   }),
-  customer: one(corporateAccounts, {
-    fields: [invoices.customerId],
-    references: [corporateAccounts.id],
+  customerOrganization: one(organizations, {
+    fields: [invoices.customerOrganizationId],
+    references: [organizations.id],
   }),
   parentInvoice: one(invoices, {
     fields: [invoices.parentInvoiceId],
@@ -653,7 +436,7 @@ export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   lineItems: many(invoiceLineItems),
   paymentAllocations: many(paymentAllocations),
   splits: many(invoiceSplits),
-  hotelFolio: one(hotelFolios),
+  billingGroup: one(billingGroups),
   auditLogs: many(invoiceAuditLog),
 }))
 
@@ -674,6 +457,7 @@ export const invoiceLineItems = pgTable('invoice_line_items', {
   // Grouping
   groupId: uuid('group_id'),
   splitGroup: text('split_group'),
+  billingGroupId: uuid('billing_group_id').references(() => billingGroups.id),
   
   // Amounts
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
@@ -712,6 +496,10 @@ export const invoiceLineItemsRelations = relations(invoiceLineItems, ({ one, man
   milestone: one(projectMilestones, {
     fields: [invoiceLineItems.milestoneId],
     references: [projectMilestones.id],
+  }),
+  billingGroup: one(billingGroups, {
+    fields: [invoiceLineItems.billingGroupId],
+    references: [billingGroups.id],
   }),
 }))
 
@@ -770,55 +558,150 @@ export const invoiceSplitsRelations = relations(invoiceSplits, ({ one }) => ({
   }),
 }))
 
-// Hotel folios
-export const hotelFolios = pgTable('hotel_folios', {
+// Billing groups (generalized from hotel folios)
+export const billingGroups = pgTable('billing_groups', {
   id: uuid('id').primaryKey().defaultRandom(),
   invoiceId: uuid('invoice_id').notNull().unique().references(() => invoices.id),
+  tabId: uuid('tab_id').references(() => tabs.id),
   
-  folioNumber: text('folio_number').notNull(),
-  folioType: text('folio_type').notNull(),
-  parentFolioId: uuid('parent_folio_id').references(() => hotelFolios.id),
+  // Group identification
+  groupNumber: text('group_number').notNull(),
+  name: text('name').notNull(),
+  groupType: text('group_type').notNull(), // company, personal, department, insurance, grant, etc.
+  parentGroupId: uuid('parent_group_id'),
   
-  guestName: text('guest_name'),
-  roomNumber: text('room_number'),
-  checkInDate: date('check_in_date'),
-  checkOutDate: date('check_out_date'),
+  // Payer information
+  payerOrganizationId: uuid('payer_organization_id').references(() => organizations.id),
+  payerEmail: text('payer_email'),
   
-  directBillCompanyId: uuid('direct_bill_company_id').references(() => corporateAccounts.id),
-  authorizationCode: text('authorization_code'),
+  // Status and limits
+  status: text('status').default('active'), // active, closed, suspended
+  creditLimit: decimal('credit_limit', { precision: 10, scale: 2 }),
+  currentBalance: decimal('current_balance', { precision: 10, scale: 2 }).default('0'),
   
+  // Financial tracking
   depositAmount: decimal('deposit_amount', { precision: 10, scale: 2 }).default('0'),
   depositApplied: decimal('deposit_applied', { precision: 10, scale: 2 }).default('0'),
   
+  // Authorization
+  authorizationCode: text('authorization_code'),
+  poNumber: text('po_number'),
+  
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => {
   return {
-    roomIdx: index('idx_hotel_folios_room').on(table.roomNumber),
+    organizationIdx: index('idx_billing_groups_organization').on(table.payerOrganizationId),
+    statusIdx: index('idx_billing_groups_status').on(table.status),
+    tabIdx: index('idx_billing_groups_tab').on(table.tabId),
+    parentIdx: index('idx_billing_groups_parent').on(table.parentGroupId),
   }
 })
 
-export const hotelFoliosRelations = relations(hotelFolios, ({ one, many }) => ({
+export const billingGroupsRelations = relations(billingGroups, ({ one, many }) => ({
   invoice: one(invoices, {
-    fields: [hotelFolios.invoiceId],
+    fields: [billingGroups.invoiceId],
     references: [invoices.id],
   }),
-  parentFolio: one(hotelFolios, {
-    fields: [hotelFolios.parentFolioId],
-    references: [hotelFolios.id],
+  tab: one(tabs, {
+    fields: [billingGroups.tabId],
+    references: [tabs.id],
   }),
-  childFolios: many(hotelFolios),
-  directBillCompany: one(corporateAccounts, {
-    fields: [hotelFolios.directBillCompanyId],
-    references: [corporateAccounts.id],
+  parentGroup: one(billingGroups, {
+    fields: [billingGroups.parentGroupId],
+    references: [billingGroups.id],
+  }),
+  childGroups: many(billingGroups),
+  payerOrganization: one(organizations, {
+    fields: [billingGroups.payerOrganizationId],
+    references: [organizations.id],
+  }),
+  rules: many(billingGroupRules),
+  lineItems: many(lineItems),
+  invoiceLineItems: many(invoiceLineItems),
+  overrides: many(billingGroupOverrides),
+  payments: many(payments),
+}))
+
+// Billing group rules
+export const billingGroupRules = pgTable('billing_group_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  billingGroupId: uuid('billing_group_id').notNull().references(() => billingGroups.id, { onDelete: 'cascade' }),
+  
+  // Rule configuration
+  name: text('name').notNull(),
+  priority: integer('priority').default(100),
+  isActive: boolean('is_active').default(true),
+  
+  // Conditions (flexible JSONB)
+  conditions: jsonb('conditions').default({}).notNull(),
+  
+  // Action when conditions match
+  action: text('action').default('auto_assign').notNull(), // auto_assign, require_approval, notify, reject
+  
+  metadata: jsonb('metadata').default({}),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    groupIdx: index('idx_billing_group_rules_group').on(table.billingGroupId),
+    activeIdx: index('idx_billing_group_rules_active').on(table.isActive),
+    priorityIdx: index('idx_billing_group_rules_priority').on(table.priority),
+  }
+})
+
+export const billingGroupRulesRelations = relations(billingGroupRules, ({ one }) => ({
+  billingGroup: one(billingGroups, {
+    fields: [billingGroupRules.billingGroupId],
+    references: [billingGroups.id],
+  }),
+}))
+
+// Billing group overrides
+export const billingGroupOverrides = pgTable('billing_group_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  lineItemId: uuid('line_item_id').notNull().references(() => lineItems.id, { onDelete: 'cascade' }),
+  originalGroupId: uuid('original_group_id').references(() => billingGroups.id),
+  assignedGroupId: uuid('assigned_group_id').notNull().references(() => billingGroups.id),
+  ruleId: uuid('rule_id').references(() => billingGroupRules.id),
+  reason: text('reason'),
+  overriddenBy: uuid('overridden_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    lineItemIdx: index('idx_billing_overrides_line_item').on(table.lineItemId),
+    assignedIdx: index('idx_billing_overrides_assigned').on(table.assignedGroupId),
+  }
+})
+
+export const billingGroupOverridesRelations = relations(billingGroupOverrides, ({ one }) => ({
+  lineItem: one(lineItems, {
+    fields: [billingGroupOverrides.lineItemId],
+    references: [lineItems.id],
+  }),
+  originalGroup: one(billingGroups, {
+    fields: [billingGroupOverrides.originalGroupId],
+    references: [billingGroups.id],
+  }),
+  assignedGroup: one(billingGroups, {
+    fields: [billingGroupOverrides.assignedGroupId],
+    references: [billingGroups.id],
+  }),
+  rule: one(billingGroupRules, {
+    fields: [billingGroupOverrides.ruleId],
+    references: [billingGroupRules.id],
+  }),
+  user: one(users, {
+    fields: [billingGroupOverrides.overriddenBy],
+    references: [users.id],
   }),
 }))
 
 // Project milestones
 export const projectMilestones = pgTable('project_milestones', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').references(() => merchants.id), // Legacy
-  organizationId: uuid('organization_id').references(() => organizations.id),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   tabId: uuid('tab_id').references(() => tabs.id),
   
   milestoneNumber: integer('milestone_number').notNull(),
@@ -842,15 +725,11 @@ export const projectMilestones = pgTable('project_milestones', {
 }, (table) => {
   return {
     tabIdx: index('idx_milestones_tab').on(table.tabId),
-    statusIdx: index('idx_milestones_status').on(table.merchantId, table.status),
+    statusIdx: index('idx_milestones_status').on(table.organizationId, table.status),
   }
 })
 
 export const projectMilestonesRelations = relations(projectMilestones, ({ one, many }) => ({
-  merchant: one(merchants, {
-    fields: [projectMilestones.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [projectMilestones.organizationId],
     references: [organizations.id],
@@ -869,10 +748,8 @@ export const projectMilestonesRelations = relations(projectMilestones, ({ one, m
 // Retainer accounts
 export const retainerAccounts = pgTable('retainer_accounts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  merchantId: uuid('merchant_id').references(() => merchants.id), // Legacy
-  organizationId: uuid('organization_id').references(() => organizations.id),
-  customerId: uuid('customer_id').references(() => corporateAccounts.id), // Legacy
-  customerOrgId: uuid('customer_org_id').references(() => organizations.id),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  customerOrgId: uuid('customer_org_id').notNull().references(() => organizations.id),
   
   accountName: text('account_name').notNull(),
   initialBalance: decimal('initial_balance', { precision: 10, scale: 2 }).notNull(),
@@ -889,22 +766,14 @@ export const retainerAccounts = pgTable('retainer_accounts', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => {
   return {
-    customerIdx: index('idx_retainer_accounts_customer').on(table.customerId),
+    customerIdx: index('idx_retainer_accounts_customer').on(table.customerOrgId),
   }
 })
 
 export const retainerAccountsRelations = relations(retainerAccounts, ({ one, many }) => ({
-  merchant: one(merchants, {
-    fields: [retainerAccounts.merchantId],
-    references: [merchants.id],
-  }),
   organization: one(organizations, {
     fields: [retainerAccounts.organizationId],
     references: [organizations.id],
-  }),
-  customer: one(corporateAccounts, {
-    fields: [retainerAccounts.customerId],
-    references: [corporateAccounts.id],
   }),
   customerOrg: one(organizations, {
     fields: [retainerAccounts.customerOrgId],
@@ -944,13 +813,43 @@ export const retainerTransactionsRelations = relations(retainerTransactions, ({ 
   }),
 }))
 
+// Organization activity log
+export const organizationActivity = pgTable('organization_activity', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: text('action').notNull(),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
+  metadata: jsonb('metadata').default('{}'),
+  ipAddress: inet('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  organizationIdx: index('idx_org_activity_organization').on(table.organizationId),
+  createdIdx: index('idx_org_activity_created').on(table.createdAt),
+  userIdx: index('idx_org_activity_user').on(table.userId),
+  entityIdx: index('idx_org_activity_entity').on(table.entityType, table.entityId),
+}))
+
+export const organizationActivityRelations = relations(organizationActivity, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [organizationActivity.organizationId],
+    references: [organizations.id],
+  }),
+  user: one(users, {
+    fields: [organizationActivity.userId],
+    references: [users.id],
+  }),
+}))
+
 // Invoice audit log
 export const invoiceAuditLog = pgTable('invoice_audit_log', {
   id: uuid('id').primaryKey().defaultRandom(),
   invoiceId: uuid('invoice_id').notNull().references(() => invoices.id),
   
   action: text('action').notNull(),
-  changedBy: uuid('changed_by').references(() => merchants.id),
+  changedBy: uuid('changed_by').references(() => users.id),
   changedByType: text('changed_by_type'),
   
   previousData: jsonb('previous_data'),
@@ -972,9 +871,9 @@ export const invoiceAuditLogRelations = relations(invoiceAuditLog, ({ one }) => 
     fields: [invoiceAuditLog.invoiceId],
     references: [invoices.id],
   }),
-  changedByMerchant: one(merchants, {
+  changedByUser: one(users, {
     fields: [invoiceAuditLog.changedBy],
-    references: [merchants.id],
+    references: [users.id],
   }),
 }))
 
@@ -987,10 +886,8 @@ export type OrganizationUser = typeof organizationUsers.$inferSelect
 export type NewOrganizationUser = typeof organizationUsers.$inferInsert
 export type OrganizationRelationship = typeof organizationRelationships.$inferSelect
 export type NewOrganizationRelationship = typeof organizationRelationships.$inferInsert
-export type Merchant = typeof merchants.$inferSelect
-export type NewMerchant = typeof merchants.$inferInsert
-export type MerchantUser = typeof merchantUsers.$inferSelect
-export type NewMerchantUser = typeof merchantUsers.$inferInsert
+export type OrganizationActivity = typeof organizationActivity.$inferSelect
+export type NewOrganizationActivity = typeof organizationActivity.$inferInsert
 export type UserSession = typeof userSessions.$inferSelect
 export type NewUserSession = typeof userSessions.$inferInsert
 export type Tab = typeof tabs.$inferSelect
@@ -1005,24 +902,18 @@ export type ApiKey = typeof apiKeys.$inferSelect
 export type NewApiKey = typeof apiKeys.$inferInsert
 export type MerchantProcessor = typeof merchantProcessors.$inferSelect
 export type NewMerchantProcessor = typeof merchantProcessors.$inferInsert
-export type CorporateAccount = typeof corporateAccounts.$inferSelect
-export type NewCorporateAccount = typeof corporateAccounts.$inferInsert
-export type CorporateApiKey = typeof corporateApiKeys.$inferSelect
-export type NewCorporateApiKey = typeof corporateApiKeys.$inferInsert
-export type CorporateMerchantRelationship = typeof corporateMerchantRelationships.$inferSelect
-export type NewCorporateMerchantRelationship = typeof corporateMerchantRelationships.$inferInsert
-export type CorporateAccountUser = typeof corporateAccountUsers.$inferSelect
-export type NewCorporateAccountUser = typeof corporateAccountUsers.$inferInsert
-export type CorporateAccountActivity = typeof corporateAccountActivity.$inferSelect
-export type NewCorporateAccountActivity = typeof corporateAccountActivity.$inferInsert
 export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect
 export type NewInvoiceLineItem = typeof invoiceLineItems.$inferInsert
 export type PaymentAllocation = typeof paymentAllocations.$inferSelect
 export type NewPaymentAllocation = typeof paymentAllocations.$inferInsert
 export type InvoiceSplit = typeof invoiceSplits.$inferSelect
 export type NewInvoiceSplit = typeof invoiceSplits.$inferInsert
-export type HotelFolio = typeof hotelFolios.$inferSelect
-export type NewHotelFolio = typeof hotelFolios.$inferInsert
+export type BillingGroup = typeof billingGroups.$inferSelect
+export type NewBillingGroup = typeof billingGroups.$inferInsert
+export type BillingGroupRule = typeof billingGroupRules.$inferSelect
+export type NewBillingGroupRule = typeof billingGroupRules.$inferInsert
+export type BillingGroupOverride = typeof billingGroupOverrides.$inferSelect
+export type NewBillingGroupOverride = typeof billingGroupOverrides.$inferInsert
 export type ProjectMilestone = typeof projectMilestones.$inferSelect
 export type NewProjectMilestone = typeof projectMilestones.$inferInsert
 export type RetainerAccount = typeof retainerAccounts.$inferSelect

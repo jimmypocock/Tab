@@ -9,7 +9,7 @@ import { createErrorResponse, createSuccessResponse } from '@/lib/api/response'
 import { withRedisCache, checkRateLimit as checkRedisRateLimit, CacheKeys } from '@/lib/redis/client'
 
 export interface ApiContext {
-  merchantId: string
+  organizationId: string
   apiKeyId: string
   requestId: string
   environment: 'live' | 'test'
@@ -61,7 +61,7 @@ export async function validateApiKey(
             eq(apiKeys.isActive, true)
           ),
           with: {
-            merchant: true,
+            organization: true,
           },
         })
       },
@@ -89,7 +89,7 @@ export async function validateApiKey(
     return {
       valid: true,
       context: {
-        merchantId: apiKeyRecord.merchantId,
+        organizationId: apiKeyRecord.organizationId,
         apiKeyId: apiKeyRecord.id,
         requestId,
         environment,
@@ -241,7 +241,7 @@ export async function withApiAuth(
     
     // Log request
     logger.logRequest(request, {
-      merchantId: context.merchantId,
+      organizationId: context.organizationId,
       requestId: context.requestId,
       environment: context.environment,
     })
@@ -259,7 +259,7 @@ export async function withApiAuth(
       response.status,
       duration,
       {
-        merchantId: context.merchantId,
+        organizationId: context.organizationId,
         requestId: context.requestId,
       }
     )

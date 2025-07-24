@@ -1,7 +1,6 @@
 /**
  * @jest-environment node
  */
-import '../test-env-setup.js' // Must be first import
 import { NextRequest } from 'next/server'
 import { GET as getTabsHandler, POST as postTabsHandler } from '@/app/api/v1/tabs/route'
 import { GET as getTabByIdHandler, PATCH as patchTabByIdHandler, DELETE as deleteTabByIdHandler } from '@/app/api/v1/tabs/[id]/route'
@@ -12,17 +11,18 @@ import {
   apiAssertions,
 } from '../helpers/api-test-helpers'
 import { testData, createTestScenario } from '../helpers/test-db'
-import { getMockedModules } from '../test-env-setup.js'
 import crypto from 'crypto'
 import * as dbQueries from '@/lib/db/queries'
+import { db } from '@/lib/db'
+
+// Mock the database queries
+jest.mock('@/lib/db/queries', () => ({
+  countRows: jest.fn().mockResolvedValue(0),
+}))
 
 describe('Tabs API', () => {
-  let mocks: ReturnType<typeof getMockedModules>
   let testScenario: ReturnType<typeof createTestScenario>
-  
-  beforeAll(() => {
-    mocks = getMockedModules()
-  })
+  const mockDb = db as jest.Mocked<typeof db>
   
   beforeEach(() => {
     jest.clearAllMocks()
@@ -32,7 +32,7 @@ describe('Tabs API', () => {
     
     // Setup default mock for API key validation with organization
     // The organization middleware expects a join query result
-    mocks.db.select.mockReturnValue({
+    mockDb.select.mockReturnValue({
       from: jest.fn().mockReturnValue({
         innerJoin: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
@@ -46,7 +46,7 @@ describe('Tabs API', () => {
     })
     
     // Mock the update for lastUsedAt
-    mocks.db.update.mockReturnValue({
+    mockDb.update.mockReturnValue({
       set: jest.fn().mockReturnValue({
         where: jest.fn().mockResolvedValue({})
       })
@@ -102,7 +102,7 @@ describe('Tabs API', () => {
         return callback(tx)
       })
       
-      mocks.db.transaction.mockImplementation(mockTransaction)
+      mockDb.transaction.mockImplementation(mockTransaction)
       
       // Act
       const request = createAuthenticatedRequest(
@@ -125,7 +125,7 @@ describe('Tabs API', () => {
         totalAmount: '50.74',
       })
       expect(data.data.paymentUrl).toContain(`/pay/${mockTab.id}`)
-      expect(mocks.db.transaction).toHaveBeenCalled()
+      expect(mockDb.transaction).toHaveBeenCalled()
     })
     
     it('should return 401 without API key', async () => {
@@ -139,7 +139,7 @@ describe('Tabs API', () => {
       const response = await postTabsHandler(request)
       
       // Assert
-      apiAssertions.expectUnauthorized(response)
+      await apiAssertions.expectUnauthorized(response)
     })
     
     it('should validate request data', async () => {
@@ -221,7 +221,7 @@ describe('Tabs API', () => {
         return callback(tx)
       })
       
-      mocks.db.transaction.mockImplementation(mockTransaction)
+      mockDb.transaction.mockImplementation(mockTransaction)
       
       // Act
       const request = createAuthenticatedRequest(
@@ -246,7 +246,7 @@ describe('Tabs API', () => {
         testData.tab(testScenario.organization.id, { status: 'paid' }),
       ]
       
-      mocks.db.query.tabs.findMany.mockResolvedValue(mockTabs)
+      mockDb.query.tabs.findMany.mockResolvedValue(mockTabs)
       jest.spyOn(dbQueries, 'countRows').mockResolvedValue(2)
       
       // Act
@@ -276,7 +276,7 @@ describe('Tabs API', () => {
       // Arrange
       const paidTab = testData.tab(testScenario.organization.id, { status: 'paid' })
       
-      mocks.db.query.tabs.findMany.mockResolvedValue([paidTab])
+      mockDb.query.tabs.findMany.mockResolvedValue([paidTab])
       jest.spyOn(dbQueries, 'countRows').mockResolvedValue(1)
       
       // Act
@@ -299,7 +299,7 @@ describe('Tabs API', () => {
     
     it('should handle invalid pagination parameters', async () => {
       // Arrange
-      mocks.db.query.tabs.findMany.mockResolvedValue([])
+      mockDb.query.tabs.findMany.mockResolvedValue([])
       jest.spyOn(dbQueries, 'countRows').mockResolvedValue(0)
       
       // Act
@@ -330,7 +330,7 @@ describe('Tabs API', () => {
         ],
       }
       
-      mocks.db.query.tabs.findFirst.mockResolvedValue(mockTab)
+      mockDb.query.tabs.findFirst.mockResolvedValue(mockTab)
       
       // Act
       const request = createAuthenticatedRequest(
@@ -359,7 +359,7 @@ describe('Tabs API', () => {
     
     it('should return 404 for non-existent tab', async () => {
       // Arrange
-      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+      mockDb.query.tabs.findFirst.mockResolvedValue(null)
       
       // Act
       const request = createAuthenticatedRequest(
@@ -386,12 +386,12 @@ describe('Tabs API', () => {
       const updateData = { status: 'void' }
       
       // Mock the findFirst calls - first for permission check, then for complete tab
-      mocks.db.query.tabs.findFirst
+      mockDb.query.tabs.findFirst
         .mockResolvedValueOnce(mockTab) // For permission check  
         .mockResolvedValueOnce({ ...mockTab, ...updateData }) // For complete updated tab
       
       // Mock the update operation  
-      mocks.db.update.mockReturnValue({
+      mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             returning: jest.fn().mockResolvedValue([{ ...mockTab, ...updateData }])
@@ -423,7 +423,7 @@ describe('Tabs API', () => {
     
     it('should return 404 for non-existent tab', async () => {
       // Arrange - mock update returning empty array (no rows affected)
-      mocks.db.update.mockReturnValue({
+      mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             returning: jest.fn().mockResolvedValue([]) // Empty array = no rows updated
@@ -451,7 +451,7 @@ describe('Tabs API', () => {
     it('should validate update data', async () => {
       // Arrange
       const mockTab = testData.tab(testScenario.organization.id)
-      mocks.db.query.tabs.findFirst.mockResolvedValue(mockTab)
+      mockDb.query.tabs.findFirst.mockResolvedValue(mockTab)
       
       // Act
       const request = createAuthenticatedRequest(
@@ -478,8 +478,8 @@ describe('Tabs API', () => {
       // Arrange
       const mockTab = testData.tab(testScenario.organization.id)
       
-      mocks.db.query.tabs.findFirst.mockResolvedValue(mockTab)
-      mocks.db.delete.mockReturnValue({
+      mockDb.query.tabs.findFirst.mockResolvedValue(mockTab)
+      mockDb.delete.mockReturnValue({
         where: jest.fn().mockResolvedValue({ count: 1 })
       })
       
@@ -498,12 +498,12 @@ describe('Tabs API', () => {
       
       // Assert
       expect(response.status).toBe(200)
-      expect(mocks.db.delete).toHaveBeenCalled()
+      expect(mockDb.delete).toHaveBeenCalled()
     })
     
     it('should return 404 when deleting non-existent tab', async () => {
       // Arrange
-      mocks.db.query.tabs.findFirst.mockResolvedValue(null)
+      mockDb.query.tabs.findFirst.mockResolvedValue(null)
       
       // Act
       const request = createAuthenticatedRequest(

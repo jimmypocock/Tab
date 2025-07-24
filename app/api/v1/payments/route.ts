@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db/client'
-import { payments } from '@/lib/db/schema'
+import { payments, billingGroups, lineItems } from '@/lib/db/schema'
 import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
 import { parseJsonBody } from '@/lib/api/middleware'
 import { createPaymentSchema, validateInput } from '@/lib/api/validation'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sum, sql } from 'drizzle-orm'
 import { 
   createSuccessResponse,
   ApiResponseBuilder 
@@ -45,16 +45,88 @@ export async function POST(request: NextRequest) {
         throw new NotFoundError('Tab')
       }
 
-      // Check if tab is already paid
-      const balance = parseFloat(tab.totalAmount) - parseFloat(tab.paidAmount)
-      if (balance <= 0) {
-        throw new ConflictError('Tab is already paid')
+      let targetBalance: number
+      let targetName: string
+      let billingGroup: any = null
+
+      if (data.billingGroupId) {
+        // Billing group payment - validate billing group and calculate its balance
+        billingGroup = await db.query.billingGroups.findFirst({
+          where: (bg, { eq, and }) => 
+            and(
+              eq(bg.id, data.billingGroupId),
+              eq(bg.tabId, data.tabId)
+            ),
+        })
+
+        if (!billingGroup) {
+          throw new NotFoundError('Billing group not found or does not belong to this tab')
+        }
+
+        // Calculate billing group balance
+        const lineItemsTotal = await db
+          .select({ total: sum(lineItems.total) })
+          .from(lineItems)
+          .where(eq(lineItems.billingGroupId, data.billingGroupId))
+          
+        const paidAmount = await db
+          .select({ total: sum(payments.amount) })
+          .from(payments)
+          .where(and(
+            eq(payments.billingGroupId, data.billingGroupId),
+            eq(payments.status, 'succeeded')
+          ))
+
+        const groupTotal = parseFloat(lineItemsTotal[0]?.total || '0')
+        const groupPaid = parseFloat(paidAmount[0]?.total || '0')
+        targetBalance = groupTotal - groupPaid
+
+        targetName = `billing group "${billingGroup.name}"`
+
+        // Check if billing group is already paid
+        if (targetBalance <= 0) {
+          throw new ConflictError('Billing group is already paid')
+        }
+
+        // For deposit groups, check if payment would exceed deposit + balance
+        if (billingGroup.groupType === 'deposit') {
+          const depositAvailable = parseFloat(billingGroup.depositAmount || '0') - parseFloat(billingGroup.depositApplied || '0')
+          if (data.amount > targetBalance + depositAvailable) {
+            throw new ValidationError('Payment amount exceeds billing group balance plus available deposit', [{
+              message: `Payment amount ${data.amount.toFixed(2)} exceeds balance ${targetBalance.toFixed(2)} plus available deposit ${depositAvailable.toFixed(2)}`,
+              path: ['amount']
+            }])
+          }
+        }
+
+        // For credit groups, check credit limit
+        if (billingGroup.groupType === 'credit') {
+          const creditLimit = parseFloat(billingGroup.creditLimit || '0')
+          const currentBalance = parseFloat(billingGroup.currentBalance || '0')
+          const availableCredit = creditLimit - currentBalance
+          
+          if (data.amount > availableCredit) {
+            throw new ValidationError('Payment amount exceeds available credit limit', [{
+              message: `Payment amount ${data.amount.toFixed(2)} exceeds available credit ${availableCredit.toFixed(2)}`,
+              path: ['amount']
+            }])
+          }
+        }
+      } else {
+        // Tab-level payment - use existing logic
+        targetBalance = parseFloat(tab.totalAmount) - parseFloat(tab.paidAmount)
+        targetName = 'tab'
+
+        // Check if tab is already paid
+        if (targetBalance <= 0) {
+          throw new ConflictError('Tab is already paid')
+        }
       }
 
-      // Validate payment amount
-      if (data.amount > balance) {
+      // Validate payment amount against target balance
+      if (data.amount > targetBalance) {
         throw new ValidationError('Payment amount exceeds balance', [{
-          message: `Payment amount ${data.amount.toFixed(2)} exceeds balance ${balance.toFixed(2)}`,
+          message: `Payment amount ${data.amount.toFixed(2)} exceeds ${targetName} balance ${targetBalance.toFixed(2)}`,
           path: ['amount']
         }])
       }
@@ -68,16 +140,27 @@ export async function POST(request: NextRequest) {
       )
 
       // Create payment intent with the processor
+      const description = billingGroup 
+        ? `Payment for ${billingGroup.name} (Tab ${tab.id})`
+        : `Payment for Tab ${tab.id}`
+
+      const paymentMetadata = {
+        tab_id: tab.id,
+        organization_id: context.organizationId,
+        customer_email: tab.customerEmail,
+        ...(billingGroup && {
+          billing_group_id: billingGroup.id,
+          billing_group_name: billingGroup.name,
+          billing_group_type: billingGroup.groupType,
+        }),
+        ...data.metadata,
+      }
+
       const paymentIntent = await processor.createPaymentIntent({
         amount: data.amount,
         currency: tab.currency,
-        description: `Payment for Tab ${tab.id}`,
-        metadata: {
-          tab_id: tab.id,
-          organization_id: context.organizationId,
-          customer_email: tab.customerEmail,
-          ...data.metadata,
-        }
+        description,
+        metadata: paymentMetadata
       })
 
       // Get the processor configuration to record which one was used
@@ -90,18 +173,21 @@ export async function POST(request: NextRequest) {
       // Create payment record
       const [payment] = await db.insert(payments).values({
         tabId: data.tabId,
+        billingGroupId: data.billingGroupId || null,
         processorId: processorConfig?.id,
         amount: data.amount.toFixed(2),
         currency: tab.currency,
         status: 'pending',
         processor: processorType,
         processorPaymentId: paymentIntent.processorPaymentId,
-        metadata: data.metadata,
+        metadata: paymentMetadata,
       }).returning()
 
       logger.info('Payment created', {
         paymentId: payment?.id,
         tabId: tab.id,
+        billingGroupId: data.billingGroupId,
+        billingGroupName: billingGroup?.name,
         organizationId: context.organizationId,
         processorType,
         amount: data.amount,
@@ -144,6 +230,7 @@ export async function GET(request: NextRequest) {
       // Get query parameters
       const { searchParams } = new URL(req.url)
       const tabId = searchParams.get('tab_id')
+      const billingGroupId = searchParams.get('billing_group_id')
       const status = searchParams.get('status')
       const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100)
       const offset = parseInt(searchParams.get('offset') || '0')
@@ -168,15 +255,32 @@ export async function GET(request: NextRequest) {
         conditions.push(eq(payments.tabId, tabId))
       }
       
+      if (billingGroupId) {
+        // Verify billing group belongs to organization's tab
+        const billingGroup = await db.query.billingGroups.findFirst({
+          where: (bg, { eq }) => eq(bg.id, billingGroupId),
+          with: {
+            tab: true,
+          },
+        })
+        
+        if (!billingGroup || billingGroup.tab?.organizationId !== context.organizationId) {
+          throw new NotFoundError('Billing group')
+        }
+        
+        conditions.push(eq(payments.billingGroupId, billingGroupId))
+      }
+      
       if (status) {
         conditions.push(eq(payments.status, status))
       }
 
-      // Fetch payments with processor information
+      // Fetch payments with processor and billing group information
       const results = await db.query.payments.findMany({
         where: conditions.length > 0 ? and(...conditions) : undefined,
         with: {
           tab: true,
+          billingGroup: true,
           processor: true,
         },
         limit,

@@ -225,6 +225,20 @@ if (!global.crypto) {
   } as any
 }
 
+// Mock setImmediate for environments where it's not available
+if (typeof setImmediate === 'undefined') {
+  global.setImmediate = ((fn: Function, ...args: any[]) => {
+    return setTimeout(fn, 0, ...args)
+  }) as any
+}
+
+// Mock clearImmediate for environments where it's not available
+if (typeof clearImmediate === 'undefined') {
+  global.clearImmediate = ((id: any) => {
+    return clearTimeout(id)
+  }) as any
+}
+
 // Mock clipboard API for jsdom environment
 if (typeof window !== 'undefined' && !navigator.clipboard) {
   Object.defineProperty(navigator, 'clipboard', {
@@ -254,6 +268,21 @@ afterAll(() => {
   console.error = originalError
 })
 
+// Mock drizzle-orm functions
+jest.mock('drizzle-orm', () => ({
+  eq: jest.fn((field, value) => ({ type: 'eq', field, value })),
+  and: jest.fn((...conditions) => ({ type: 'and', conditions })),
+  or: jest.fn((...conditions) => ({ type: 'or', conditions })),
+  desc: jest.fn((field) => ({ type: 'desc', field })),
+  asc: jest.fn((field) => ({ type: 'asc', field })),
+  gte: jest.fn((field, value) => ({ type: 'gte', field, value })),
+  lte: jest.fn((field, value) => ({ type: 'lte', field, value })),
+  like: jest.fn((field, value) => ({ type: 'like', field, value })),
+  inArray: jest.fn((field, values) => ({ type: 'inArray', field, values })),
+  sql: jest.fn(),
+  relations: jest.fn(() => ({})),
+}))
+
 // Polyfill fetch for tests
 if (typeof fetch === 'undefined') {
   const nodeFetch = require('node-fetch')
@@ -262,6 +291,398 @@ if (typeof fetch === 'undefined') {
   global.Request = nodeFetch.Request
   global.Headers = nodeFetch.Headers
 }
+
+// Mock db/client to match what routes import
+jest.mock('@/lib/db/client', () => {
+  const mockDb = require('@/lib/db').db
+  return { db: mockDb }
+})
+
+// Mock the database client to prevent actual connections
+jest.mock('postgres', () => {
+  return jest.fn(() => {
+    const mockClient = () => ({
+      then: jest.fn(),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    })
+    mockClient.unsafe = jest.fn()
+    mockClient.begin = jest.fn()
+    mockClient.end = jest.fn()
+    mockClient.file = jest.fn()
+    mockClient.notify = jest.fn()
+    mockClient.listen = jest.fn()
+    mockClient.unlisten = jest.fn()
+    mockClient.options = {}
+    mockClient.types = {
+      parsers: {}
+    }
+    return mockClient
+  })
+})
+
+// Mock drizzle-orm to prevent database operations
+jest.mock('drizzle-orm/postgres-js', () => {
+  // Create a comprehensive thenable mock chain that supports all methods
+  const createThenable = (value = []) => {
+    const thenable = {
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return thenable
+  }
+  
+  const createMockQueryChain = (value = []) => {
+    const chain = {
+      from: jest.fn(() => createMockQueryChain(value)),
+      where: jest.fn(() => createMockQueryChain(value)),
+      orderBy: jest.fn(() => createMockQueryChain(value)),
+      limit: jest.fn(() => createThenable(value)),
+      innerJoin: jest.fn(() => createMockQueryChain(value)),
+      leftJoin: jest.fn(() => createMockQueryChain(value)),
+      groupBy: jest.fn(() => createMockQueryChain(value)),
+      having: jest.fn(() => createMockQueryChain(value)),
+      offset: jest.fn(() => createMockQueryChain(value)),
+      // Make the chain itself thenable so it can be awaited at any point
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockInsertChain = (value = []) => {
+    const chain = {
+      values: jest.fn(() => createMockInsertChain(value)),
+      returning: jest.fn(() => createThenable(value)),
+      onConflictDoUpdate: jest.fn(() => createMockInsertChain(value)),
+      onConflictDoNothing: jest.fn(() => createThenable(value)),
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockUpdateChain = (value = []) => {
+    const chain = {
+      set: jest.fn(() => createMockUpdateChain(value)),
+      where: jest.fn(() => createMockUpdateChain(value)),
+      returning: jest.fn(() => createThenable(value)),
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockDeleteChain = () => {
+    const chain = {
+      where: jest.fn(() => createThenable()),
+      then: jest.fn((resolve) => resolve()),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  return {
+    drizzle: jest.fn(() => ({
+      select: jest.fn(() => createMockQueryChain([])),
+      insert: jest.fn(() => createMockInsertChain([])),
+      update: jest.fn(() => createMockUpdateChain([])),
+      delete: jest.fn(() => createMockDeleteChain()),
+      transaction: jest.fn(),
+      query: {},
+    }))
+  }
+})
+
+
+// Set DATABASE_URL to prevent connection attempts
+process.env.DATABASE_URL = 'postgresql://mock:mock@localhost:5432/mock'
+
+// Mock database client and schema
+jest.mock('@/lib/db', () => {
+  // Create a comprehensive thenable mock chain that supports all methods
+  const createThenable = (value = []) => {
+    const thenable = {
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return thenable
+  }
+  
+  const createMockQueryChain = (value = []) => {
+    const chain = {
+      from: jest.fn(() => createMockQueryChain(value)),
+      where: jest.fn(() => createMockQueryChain(value)),
+      orderBy: jest.fn(() => createMockQueryChain(value)),
+      limit: jest.fn(() => createMockQueryChain(value)),
+      innerJoin: jest.fn(() => createMockQueryChain(value)),
+      leftJoin: jest.fn(() => createMockQueryChain(value)),
+      groupBy: jest.fn(() => createMockQueryChain(value)),
+      having: jest.fn(() => createMockQueryChain(value)),
+      offset: jest.fn(() => createMockQueryChain(value)),
+      // Make the chain itself thenable so it can be awaited at any point
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockInsertChain = (value = []) => {
+    const chain = {
+      values: jest.fn(() => createMockInsertChain(value)),
+      returning: jest.fn(() => createThenable(value)),
+      onConflictDoUpdate: jest.fn(() => createMockInsertChain(value)),
+      onConflictDoNothing: jest.fn(() => createThenable(value)),
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockUpdateChain = (value = []) => {
+    const chain = {
+      set: jest.fn(() => createMockUpdateChain(value)),
+      where: jest.fn(() => createMockUpdateChain(value)),
+      returning: jest.fn(() => createThenable(value)),
+      then: jest.fn((resolve) => resolve(value)),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  const createMockDeleteChain = () => {
+    const chain = {
+      where: jest.fn(() => createThenable()),
+      then: jest.fn((resolve) => resolve()),
+      catch: jest.fn(),
+      finally: jest.fn(),
+    }
+    return chain
+  }
+  
+  return {
+    db: {
+      select: jest.fn(() => createMockQueryChain([])),
+      insert: jest.fn(() => createMockInsertChain([])),
+      update: jest.fn(() => createMockUpdateChain([])),
+      delete: jest.fn(() => createMockDeleteChain()),
+      transaction: jest.fn((callback) => {
+        // Simple transaction mock that just executes the callback
+        const tx = {
+          select: jest.fn(() => createMockQueryChain([])),
+          insert: jest.fn(() => createMockInsertChain([])),
+          update: jest.fn(() => createMockUpdateChain([])),
+          delete: jest.fn(() => createMockDeleteChain()),
+        }
+        return Promise.resolve(callback(tx))
+      }),
+      query: {
+        tabs: {
+          findFirst: jest.fn(() => Promise.resolve(null)),
+          findMany: jest.fn(() => Promise.resolve([])),
+        },
+        lineItems: {
+          findFirst: jest.fn(() => Promise.resolve(null)),
+          findMany: jest.fn(() => Promise.resolve([])),
+        },
+        billingGroups: {
+          findFirst: jest.fn(() => Promise.resolve(null)),
+          findMany: jest.fn(() => Promise.resolve([])),
+        },
+      },
+    },
+    // Mock schema tables with more complete structure
+    tabs: { 
+      id: 'id', 
+      name: 'name', 
+      organizationId: 'organizationId',
+      totalAmount: 'totalAmount',
+      status: 'status',
+      createdAt: 'createdAt'
+    },
+    lineItems: { 
+      id: 'id', 
+      tabId: 'tabId', 
+      billingGroupId: 'billingGroupId',
+      description: 'description',
+      quantity: 'quantity',
+      unitPrice: 'unitPrice',
+      total: 'total'
+    },
+    billingGroups: { 
+      id: 'id', 
+      tabId: 'tabId',
+      name: 'name',
+      groupType: 'groupType',
+      status: 'status',
+      payerEmail: 'payerEmail',
+      payerOrganizationId: 'payerOrganizationId',
+      creditLimit: 'creditLimit',
+      currentBalance: 'currentBalance',
+      depositAmount: 'depositAmount',
+      depositApplied: 'depositApplied',
+      createdAt: 'createdAt'
+    },
+    organizations: { 
+      id: 'id',
+      name: 'name'
+    },
+    payments: {
+      id: 'id',
+      status: 'status'
+    },
+    // Mock drizzle helper functions
+    eq: jest.fn((col, val) => ({ type: 'eq', column: col, value: val })),
+    and: jest.fn((...conditions) => ({ type: 'and', conditions })),
+    or: jest.fn((...conditions) => ({ type: 'or', conditions })),
+    desc: jest.fn((col) => ({ type: 'desc', column: col })),
+    asc: jest.fn((col) => ({ type: 'asc', column: col })),
+    sql: jest.fn((strings, ...values) => ({ type: 'sql', strings, values })),
+    isNull: jest.fn((col) => ({ type: 'isNull', column: col })),
+    isNotNull: jest.fn((col) => ({ type: 'isNotNull', column: col })),
+  }
+})
+
+// Mock withApiAuth for all tests
+jest.mock('@/lib/api/middleware', () => ({
+  withApiAuth: jest.fn((handler) => {
+    return async (req: any, context: any, params: any) => {
+      const mockApiContext = {
+        organizationId: 'org_123',
+        apiKeyId: 'key_123', 
+        requestId: 'req_123',
+        environment: 'test' as const
+      }
+      return handler(req, mockApiContext, params)
+    }
+  }),
+  parseJsonBody: jest.fn(async (req: any) => {
+    // Simple implementation for tests
+    if (req.body) return req.body
+    if (req.json && typeof req.json === 'function') return req.json()
+    return {}
+  })
+}))
+
+// Mock NextResponse for API route tests
+jest.mock('next/server', () => ({
+  NextRequest: jest.fn().mockImplementation((url, init) => {
+    return {
+      url,
+      method: init?.method || 'GET',
+      headers: new Headers(init?.headers || {}),
+      json: async () => init?.body ? JSON.parse(init.body) : {},
+      text: async () => init?.body || '',
+    }
+  }),
+  NextResponse: {
+    json: jest.fn((data, init) => ({
+      status: init?.status || 200,
+      headers: new Headers(init?.headers || {}),
+      json: async () => data,
+      ok: (init?.status || 200) >= 200 && (init?.status || 200) < 300,
+    })),
+  }
+}))
+
+// Mock organization middleware
+jest.mock('@/lib/api/organization-middleware', () => ({
+  withOrganizationAuth: jest.fn((request, handler) => {
+    // Handle both patterns:
+    // 1. withOrganizationAuth(handler) - returns a wrapped handler
+    // 2. withOrganizationAuth(request, handler) - executes immediately
+    
+    if (typeof request === 'function') {
+      // Pattern 1: request is actually the handler
+      const actualHandler = request
+      return async (req: any, params: any) => {
+        // Check for API key header
+        const apiKey = req.headers?.get?.('X-API-Key') || req.headers?.['X-API-Key']
+        if (!apiKey) {
+          return {
+            status: 401,
+            json: async () => ({ error: 'Unauthorized' }),
+            ok: false,
+          }
+        }
+        
+        const mockOrgContext = {
+          organizationId: 'org_123',
+          userId: 'user_123'
+        }
+        return actualHandler(req, mockOrgContext, params)
+      }
+    } else {
+      // Pattern 2: request is the request object, handler is the second param
+      // Return an async function that handles the request
+      return (async () => {
+        // Check for API key header
+        const apiKey = request.headers?.get?.('X-API-Key') || request.headers?.['X-API-Key']
+        if (!apiKey) {
+          return {
+            status: 401,
+            json: async () => ({ error: 'Unauthorized' }),
+            ok: false,
+          }
+        }
+        
+        const mockOrgContext = {
+          organizationId: 'org_123',
+          userId: 'user_123'
+        }
+        
+        try {
+          return await handler(request, mockOrgContext)
+      } catch (error: any) {
+        // Handle errors like the real middleware does
+        if (error.name === 'ValidationError') {
+          return {
+            status: 400,
+            json: async () => ({ error: { message: error.message, details: error.details || error.issues } }),
+            ok: false,
+          }
+        }
+        if (error.name === 'NotFoundError') {
+          return {
+            status: 404,
+            json: async () => ({ error: error.message }),
+            ok: false,
+          }
+        }
+        if (error.name === 'ConflictError') {
+          return {
+            status: 409,
+            json: async () => ({ error: error.message }),
+            ok: false,
+          }
+        }
+        if (error.name === 'DatabaseError') {
+          return {
+            status: 500,
+            json: async () => ({ error: error.message }),
+            ok: false,
+          }
+        }
+        // Default error response
+        return {
+          status: 500,
+          json: async () => ({ error: 'Internal server error' }),
+          ok: false,
+        }
+      }
+      })()
+    }
+  })
+}))
 
 // Setup MSW if available
 try {

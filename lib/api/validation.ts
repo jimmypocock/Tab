@@ -91,6 +91,7 @@ export const updateLineItemSchema = z.object({
 // Payment schemas
 export const createPaymentSchema = z.object({
   tabId: uuidSchema,
+  billingGroupId: uuidSchema.optional(), // Optional billing group for group-specific payments
   amount: positiveNumberSchema,
   currency: currencySchema.optional(),
   paymentMethodId: z.string().min(1).optional(), // Payment method ID (processor-specific)
@@ -116,9 +117,26 @@ export const paymentQuerySchema = paginationSchema.extend({
 // Invoice schemas
 export const createInvoiceSchema = z.object({
   tabId: uuidSchema,
+  billingGroupId: uuidSchema.optional(), // Optional billing group for group-specific invoices
+  lineItemIds: z.array(uuidSchema).optional(), // Optional specific line items
   dueDate: z.string().datetime(),
+  paymentTerms: z.string().max(500).optional(),
+  notes: z.string().max(1000).optional(),
   sendImmediately: z.boolean().default(false),
-  message: z.string().max(1000).optional(),
+  billingAddress: z.record(z.string(), z.unknown()).optional(),
+  shippingAddress: z.record(z.string(), z.unknown()).optional(),
+  metadata: metadataSchema,
+})
+
+export const createBillingGroupInvoiceSchema = z.object({
+  billingGroupId: uuidSchema,
+  dueDate: z.string().datetime(),
+  paymentTerms: z.string().max(500).optional(),
+  notes: z.string().max(1000).optional(),
+  includeUnassignedItems: z.boolean().default(false),
+  sendImmediately: z.boolean().default(false),
+  billingAddress: z.record(z.string(), z.unknown()).optional(),
+  shippingAddress: z.record(z.string(), z.unknown()).optional(),
   metadata: metadataSchema,
 })
 
@@ -165,6 +183,7 @@ export type CreatePaymentInput = z.infer<typeof createPaymentSchema>
 export type CreatePaymentIntentInput = z.infer<typeof createPaymentIntentSchema>
 export type PaymentQuery = z.infer<typeof paymentQuerySchema>
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>
+export type CreateBillingGroupInvoiceInput = z.infer<typeof createBillingGroupInvoiceSchema>
 export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>
 export type ApiError = z.infer<typeof apiErrorSchema>
 export type PaginationParams = z.infer<typeof paginationSchema>

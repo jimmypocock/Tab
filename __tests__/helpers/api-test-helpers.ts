@@ -57,14 +57,36 @@ export function createAuthenticatedRequest(
 
 // Helper to extract response data
 export async function getResponseData<T = any>(response: NextResponse): Promise<T> {
-  // Clone the response to avoid "Body has already been read" errors
-  const clonedResponse = response.clone()
-  const text = await clonedResponse.text()
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new Error(`Invalid JSON response: ${text}`)
+  // Handle both real NextResponse and mock response objects
+  if (!response) {
+    throw new Error('Response is undefined')
   }
+  
+  // For mock responses that don't have clone method
+  if (typeof response.json === 'function') {
+    try {
+      return await response.json()
+    } catch (error) {
+      // If json() fails, try text()
+      if (typeof response.text === 'function') {
+        const text = await response.text()
+        return JSON.parse(text)
+      }
+    }
+  }
+  
+  // For real NextResponse objects
+  if (typeof response.clone === 'function') {
+    const clonedResponse = response.clone()
+    const text = await clonedResponse.text()
+    try {
+      return JSON.parse(text)
+    } catch {
+      throw new Error(`Invalid JSON response: ${text}`)
+    }
+  }
+  
+  throw new Error('Invalid response object')
 }
 
 // Mock implementations for testing
