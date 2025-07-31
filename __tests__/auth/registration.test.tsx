@@ -91,7 +91,6 @@ describe('Registration Flow', () => {
     it('renders registration form', () => {
       render(<RegisterPage />)
 
-      expect(screen.getByLabelText('Business Name')).toBeInTheDocument()
       expect(screen.getByLabelText('Email Address')).toBeInTheDocument()
       expect(screen.getByLabelText('Password')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
@@ -110,9 +109,6 @@ describe('Registration Flow', () => {
 
       render(<RegisterPage />)
 
-      fireEvent.change(screen.getByLabelText('Business Name'), {
-        target: { value: 'Test Business' },
-      })
       fireEvent.change(screen.getByLabelText('Email Address'), {
         target: { value: 'test@example.com' },
       })
@@ -127,9 +123,7 @@ describe('Registration Flow', () => {
           email: 'test@example.com',
           password: 'password123',
           options: {
-            data: {
-              businessName: 'Test Business',
-            },
+            emailRedirectTo: 'http://localhost/login?emailConfirmed=true',
           },
         })
         expect(mockPush).toHaveBeenCalledWith('/confirm-email?email=test%40example.com')
@@ -144,9 +138,6 @@ describe('Registration Flow', () => {
 
       render(<RegisterPage />)
 
-      fireEvent.change(screen.getByLabelText('Business Name'), {
-        target: { value: 'Test Business' },
-      })
       fireEvent.change(screen.getByLabelText('Email Address'), {
         target: { value: 'existing@example.com' },
       })

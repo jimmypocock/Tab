@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Home, FileText, CreditCard, Settings, LogOut, Users } from 'lucide-react'
 import { DashboardProviders } from './dashboard-providers'
 import { OrganizationSwitcher } from '@/components/dashboard/organization-switcher'
+import { getSelectedOrganizationId } from './actions/organization-actions'
 
 async function signOut() {
   'use server'
@@ -75,10 +76,18 @@ export default async function DashboardLayout({
     )
   }
 
-  // For now, just use the first organization
-  // In a production app, you might want to store user preference in database
-  // or implement a more sophisticated organization selection mechanism
-  const currentOrganizationData = userOrganizations[0]
+  // Get the user's selected organization from cookie
+  const selectedOrgId = await getSelectedOrganizationId()
+  
+  // Find the selected organization or default to the first one
+  let currentOrganizationData = selectedOrgId
+    ? userOrganizations.find(org => org.organizations?.id === selectedOrgId)
+    : null
+    
+  // If selected org not found (user may have lost access), use the first one
+  if (!currentOrganizationData) {
+    currentOrganizationData = userOrganizations[0]
+  }
     
   if (!currentOrganizationData?.organizations) {
     // This is also an error case - the join should always return the organization

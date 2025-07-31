@@ -77,7 +77,6 @@ describe('User Signup Flow Integration', () => {
       const testUser = {
         id: 'test-user-id',
         email: 'test@example.com',
-        businessName: 'Test Business',
       }
 
       // Step 1: User signs up
@@ -91,11 +90,11 @@ describe('User Signup Flow Integration', () => {
         error: null,
       })
 
-      // Simulate the trigger creating organization (this should be automatic)
+      // No organization is created automatically anymore
       const mockOrganization = {
         id: 'test-org-id',
-        name: testUser.businessName,
-        slug: 'test-business',
+        name: 'Test Organization',
+        slug: 'test-organization',
         is_merchant: true,
         is_corporate: false,
       }
@@ -147,22 +146,18 @@ describe('User Signup Flow Integration', () => {
       
       const emailInput = screen.getByLabelText(/email address/i)
       const passwordInput = screen.getByLabelText(/password/i)
-      const businessNameInput = screen.getByLabelText(/business name/i)
       const submitButton = screen.getByRole('button', { name: /create account/i })
 
       await userEvent.type(emailInput, testUser.email)
       await userEvent.type(passwordInput, 'password123')
-      await userEvent.type(businessNameInput, testUser.businessName)
       await userEvent.click(submitButton)
 
-      // Verify signup was called with correct metadata
+      // Verify signup was called without metadata (no business name anymore)
       expect(mockSupabaseClient.auth.signUp).toHaveBeenCalledWith({
         email: testUser.email,
         password: 'password123',
         options: {
-          data: {
-            businessName: testUser.businessName,
-          },
+          emailRedirectTo: 'http://localhost/login?emailConfirmed=true',
         },
       })
 

@@ -62,6 +62,11 @@ export class InvitationService {
       throw error
     }
 
+    if (!invitation) {
+      console.error('No invitation returned from insert')
+      throw new Error('Failed to create invitation')
+    }
+
     return { invitation, token }
   }
 
@@ -92,9 +97,26 @@ export class InvitationService {
 
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/accept-invitation?token=${token}`
 
+    // In development with test API key, only send to allowed email
+    const isDevelopment = process.env.NODE_ENV === 'development'
+    const allowedTestEmail = 'jimmypocock@yahoo.com'
+    
+    if (isDevelopment && email !== allowedTestEmail) {
+      console.log(`[DEV MODE] Would send invitation email to: ${email}`)
+      console.log(`[DEV MODE] Invitation link: ${inviteUrl}`)
+      return { 
+        success: true, 
+        mockMode: true,
+        message: `In development mode, emails can only be sent to ${allowedTestEmail}. The invitation link would be: ${inviteUrl}`
+      }
+    }
+    
     try {
+      console.log('Sending invitation email to:', email)
+      console.log('From domain:', process.env.RESEND_DOMAIN || 'resend.dev')
+      
       const { data, error } = await resend.emails.send({
-        from: 'Tab <noreply@tab-api.com>',
+        from: `Tab <noreply@${process.env.RESEND_DOMAIN || 'resend.dev'}>`,
         to: email,
         subject: `You've been invited to join ${organizationName} on Tab`,
         html: `
@@ -118,6 +140,7 @@ export class InvitationService {
           </div>
         `,
       })
+
 
       if (error) {
         console.error('Error sending invitation email:', error)
@@ -150,6 +173,7 @@ export class InvitationService {
       throw error
     }
 
+    // The function now returns the correct format directly
     return data
   }
 

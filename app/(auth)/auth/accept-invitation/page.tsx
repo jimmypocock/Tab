@@ -17,11 +17,17 @@ export default function AcceptInvitationPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [invitationDetails, setInvitationDetails] = useState<any>(null)
-  const [email, setEmail] = useState('')
+  const [invitedEmail, setInvitedEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
   const [isNewUser, setIsNewUser] = useState(true)
   const [processing, setProcessing] = useState(false)
+  const [organizationName, setOrganizationName] = useState('')
+  const [showOtpInput, setShowOtpInput] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null)
+  const [inviterEmail, setInviterEmail] = useState('')
+  const [isExpired, setIsExpired] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   useEffect(() => {
     if (token) {
@@ -34,18 +40,52 @@ export default function AcceptInvitationPage() {
 
   const checkInvitation = async () => {
     try {
+      // First fetch invitation details
+      const response = await fetch(`/api/v1/auth/invitation-details?token=${token}`)
+      const data = await response.json()
+      
+      if (!response.ok) {
+        if (data.error === 'This invitation has expired') {
+          setIsExpired(true)
+          setInvitedEmail(data.email || '')
+          setOrganizationName(data.organizationName || '')
+        }
+        setError(data.error || 'Invalid invitation')
+        setLoading(false)
+        return
+      }
+      
+      setInvitedEmail(data.email)
+      setOrganizationName(data.organizationName)
+      
       const supabase = createClient()
       
       // Check if user is already logged in
       const { data: { user } } = await supabase.auth.getUser()
       
       if (user) {
-        // User is logged in, try to accept invitation directly
-        acceptInvitation(user.id)
+        // User is logged in, check if email matches
+        if (user.email !== data.email) {
+          setError('You are logged in with a different email address. Please log out and try again.')
+          setLoading(false)
+          return
+        }
+        
+        // Check if this is a confirmed user returning from email confirmation
+        if (user.email_confirmed_at) {
+          // User is confirmed, accept invitation directly
+          acceptInvitation(user.id)
+        } else {
+          // User still needs to confirm email
+          showToast({
+            type: 'info',
+            title: 'Please confirm your email',
+            description: `Check ${data.email} and click the confirmation link to complete joining ${organizationName}`
+          })
+          setLoading(false)
+        }
       } else {
         // User needs to sign up or log in
-        // For now, we'll show the sign up form
-        // In a real implementation, you'd fetch invitation details from the token
         setLoading(false)
       }
     } catch (err) {
@@ -72,6 +112,13 @@ export default function AcceptInvitationPage() {
 
       const data = await response.json()
 
+      if (!response.ok) {
+        console.error('Accept invitation failed:', response.status, data)
+        setError(data.error || `Failed to accept invitation (${response.status})`)
+        setProcessing(false)
+        return
+      }
+
       if (data.success) {
         setSuccess(true)
         setInvitationDetails(data)
@@ -80,7 +127,7 @@ export default function AcceptInvitationPage() {
         }, 2000)
       } else {
         setError(data.error || 'Failed to accept invitation')
-        setLoading(false)
+        setProcessing(false)
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to accept invitation'
@@ -90,7 +137,7 @@ export default function AcceptInvitationPage() {
         description: errorMessage
       })
       setError(errorMessage)
-      setLoading(false)
+      setProcessing(false)
     }
   }
 
@@ -105,13 +152,8 @@ export default function AcceptInvitationPage() {
       if (isNewUser) {
         // Sign up new user
         const { data: authData, error: signUpError } = await supabase.auth.signUp({
-          email,
+          email: invitedEmail,
           password,
-          options: {
-            data: {
-              full_name: fullName,
-            },
-          },
         })
 
         if (signUpError) {
@@ -126,12 +168,25 @@ export default function AcceptInvitationPage() {
           return
         }
 
-        // Accept invitation with new user ID
+        // Check if email confirmation is required
+        if (!authData.user.email_confirmed_at) {
+          setPendingUserId(authData.user.id)
+          setShowOtpInput(true)
+          showToast({
+            type: 'info',
+            title: 'Check your email',
+            description: `Please check ${invitedEmail} and click the confirmation link, or enter the 6-digit code below`
+          })
+          setProcessing(false)
+          return
+        }
+
+        // Accept invitation with confirmed user
         await acceptInvitation(authData.user.id)
       } else {
         // Sign in existing user
         const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
+          email: invitedEmail,
           password,
         })
 
@@ -147,6 +202,9 @@ export default function AcceptInvitationPage() {
           return
         }
 
+        // For sign in, wait a moment for session to establish
+        await new Promise(resolve => setTimeout(resolve, 500))
+
         // Accept invitation with user ID
         await acceptInvitation(authData.user.id)
       }
@@ -159,6 +217,82 @@ export default function AcceptInvitationPage() {
       })
       setError(errorMessage)
       setProcessing(false)
+    }
+  }
+
+  const handleOtpVerification = async () => {
+    if (!otpCode || !pendingUserId) return
+    
+    setProcessing(true)
+    try {
+      const supabase = createClient()
+      
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: invitedEmail,
+        token: otpCode,
+        type: 'signup'
+      })
+
+      if (error) {
+        setError(error.message)
+        setProcessing(false)
+        return
+      }
+
+      if (data.user) {
+        // OTP verified, accept invitation
+        await acceptInvitation(data.user.id)
+      } else {
+        setError('Failed to verify code')
+        setProcessing(false)
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to verify code'
+      setError(errorMessage)
+      setProcessing(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    try {
+      const supabase = createClient()
+      
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: invitedEmail,
+      })
+
+      if (error) {
+        showToast({
+          type: 'error',
+          title: 'Failed to resend code',
+          description: error.message
+        })
+      } else {
+        showToast({
+          type: 'success',
+          title: 'Code sent',
+          description: `A new code has been sent to ${invitedEmail}`
+        })
+        
+        // Set cooldown timer
+        setResendCooldown(60)
+        const interval = setInterval(() => {
+          setResendCooldown(prev => {
+            if (prev <= 1) {
+              clearInterval(interval)
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+      }
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Failed to resend code',
+        description: 'An unexpected error occurred'
+      })
     }
   }
 
@@ -180,7 +314,7 @@ export default function AcceptInvitationPage() {
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
           <h2 className="text-2xl font-bold text-gray-900">Invitation Accepted!</h2>
           <p className="text-gray-600">
-            You've successfully joined {invitationDetails?.organizationName || 'the organization'}.
+            You've successfully joined {organizationName || 'the organization'}.
             Redirecting to dashboard...
           </p>
         </div>
@@ -217,7 +351,7 @@ export default function AcceptInvitationPage() {
             Accept Team Invitation
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            {isNewUser ? 'Create an account to join your team' : 'Sign in to accept your invitation'}
+            {isNewUser ? `Create an account to join ${organizationName}` : `Sign in to join ${organizationName}`}
           </p>
         </div>
         
@@ -234,26 +368,10 @@ export default function AcceptInvitationPage() {
           </div>
         )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        {!showOtpInput && (
+          <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <input type="hidden" name="remember" value="true" />
           <div className="rounded-md shadow-sm -space-y-px">
-            {isNewUser && (
-              <div>
-                <label htmlFor="full-name" className="sr-only">
-                  Full Name
-                </label>
-                <input
-                  id="full-name"
-                  name="full-name"
-                  type="text"
-                  required={isNewUser}
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="Full Name"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
-              </div>
-            )}
             <div>
               <label htmlFor="email-address" className="sr-only">
                 Email address
@@ -264,12 +382,10 @@ export default function AcceptInvitationPage() {
                 type="email"
                 autoComplete="email"
                 required
-                className={`appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 ${
-                  !isNewUser ? 'rounded-t-md' : ''
-                } focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm`}
+                readOnly
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md bg-gray-50 cursor-not-allowed focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
                 placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={invitedEmail}
               />
             </div>
             <div>
@@ -318,7 +434,51 @@ export default function AcceptInvitationPage() {
               )}
             </button>
           </div>
-        </form>
+          </form>
+        )}
+
+        {/* OTP Verification */}
+        {showOtpInput && (
+          <div className="mt-8 bg-blue-50 rounded-lg p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Enter Confirmation Code</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter the 6-digit code sent to {invitedEmail}
+            </p>
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-center text-lg font-mono"
+                placeholder="123456"
+              />
+              <button
+                onClick={handleOtpVerification}
+                disabled={otpCode.length !== 6 || processing}
+                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Verify'
+                )}
+              </button>
+            </div>
+            <div className="mt-4 text-center">
+              <button
+                onClick={handleResendCode}
+                disabled={processing || resendCooldown > 0}
+                className="text-sm text-indigo-600 hover:text-indigo-500 disabled:text-gray-400 disabled:cursor-not-allowed"
+              >
+                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

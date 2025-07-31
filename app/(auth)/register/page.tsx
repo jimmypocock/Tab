@@ -8,7 +8,6 @@ import { createClient } from '@/lib/supabase/client'
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [businessName, setBusinessName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -25,16 +24,14 @@ export default function RegisterPage() {
         email,
         password,
         options: {
-          data: {
-            businessName: businessName,
-          },
+          emailRedirectTo: `${window.location.origin}/login?emailConfirmed=true`,
         },
       })
 
       if (authError) {
         setError(authError.message)
       } else if (authData.user) {
-        // Merchant record is created automatically by database trigger
+        // User record is created automatically by database trigger
         // Redirect to a confirmation page
         router.push(`/confirm-email?email=${encodeURIComponent(email)}`)
       }
@@ -64,21 +61,6 @@ export default function RegisterPage() {
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleRegister}>
           <div className="space-y-4">
-            <div>
-              <label htmlFor="business-name" className="block text-sm font-medium text-gray-700">
-                Business Name
-              </label>
-              <input
-                id="business-name"
-                name="business-name"
-                type="text"
-                required
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Your Business Name"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-              />
-            </div>
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                 Email Address

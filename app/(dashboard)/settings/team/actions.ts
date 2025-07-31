@@ -17,7 +17,7 @@ export async function getTeamMembers(organizationId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Unauthorized')
   
-  // Get team members with user details
+  // Get active team members with user details
   const { data: members, error } = await supabase
     .from('organization_users')
     .select(`
@@ -34,6 +34,7 @@ export async function getTeamMembers(organizationId: string) {
       )
     `)
     .eq('organization_id', organizationId)
+    .neq('status', 'pending_invitation')
     .order('role', { ascending: true })
     .order('joined_at', { ascending: true })
   
@@ -42,13 +43,26 @@ export async function getTeamMembers(organizationId: string) {
     throw error
   }
   
-  // Transform the data to match our component's expected structure
-  return members.map(member => ({
+  // Get pending invitations
+  const { data: invitations, error: invError } = await supabase
+    .from('invitation_tokens')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .is('accepted_at', null)
+    .gte('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+  
+  if (invError) {
+    console.error('Error fetching invitations:', invError)
+  }
+  
+  // Transform active members
+  const activeMembers = members.map(member => ({
     id: member.id,
     user: member.user ? {
       id: member.user.id,
       email: member.user.email,
-      full_name: undefined // We'll need to get this from auth.users if needed
+      full_name: undefined
     } : null,
     role: member.role,
     status: member.status,
@@ -57,6 +71,27 @@ export async function getTeamMembers(organizationId: string) {
     joinedAt: member.joined_at,
     invitedAt: member.invited_at,
   }))
+  
+  // Transform pending invitations
+  const pendingMembers = (invitations || []).map(inv => ({
+    id: inv.id,
+    user: {
+      id: inv.id,
+      email: inv.email,
+      full_name: undefined
+    },
+    role: inv.role,
+    status: 'pending_invitation',
+    department: null,
+    title: null,
+    joinedAt: null,
+    invitedAt: inv.created_at,
+    invitationId: inv.id,
+    expiresAt: inv.expires_at,
+  }))
+  
+  // Combine and return all members
+  return [...activeMembers, ...pendingMembers]
 }
 
 export async function inviteTeamMember(
@@ -89,6 +124,20 @@ export async function inviteTeamMember(
       return { error: 'Invalid email or role' }
     }
     
+    // First check if there's already a pending invitation
+    const { data: existingInvitation } = await supabase
+      .from('invitation_tokens')
+      .select('id, email')
+      .eq('organization_id', organizationId)
+      .eq('email', email)
+      .is('accepted_at', null)
+      .gte('expires_at', new Date().toISOString())
+      .single()
+    
+    if (existingInvitation) {
+      return { error: 'An invitation has already been sent to this email address' }
+    }
+    
     // Check if user already exists
     const { data: existingUser } = await supabase
       .from('users')
@@ -100,12 +149,15 @@ export async function inviteTeamMember(
       // Check if already a member
       const { data: existingMembership } = await supabase
         .from('organization_users')
-        .select('id')
+        .select('id, status')
         .eq('organization_id', organizationId)
         .eq('user_id', existingUser.id)
         .single()
       
       if (existingMembership) {
+        if (existingMembership.status === 'pending_invitation') {
+          return { error: 'An invitation has already been sent to this user' }
+        }
         return { error: 'User is already a member of this organization' }
       }
       
@@ -152,34 +204,30 @@ export async function inviteTeamMember(
           invitedBy: user.id,
         })
         
-        // Send invitation email
-        await InvitationService.sendInvitationEmail({
-          email,
-          inviterName,
-          organizationName: organization?.name || 'the organization',
-          token,
-        })
         
-        // Create a pending organization_users record
-        const { error: placeholderError } = await supabase
-          .from('organization_users')
-          .insert({
-            organization_id: organizationId,
-            user_id: user.id, // Temporary - will be updated when invitation is accepted
-            role,
-            invited_by: user.id,
-            invited_at: new Date().toISOString(),
-            invitation_token_id: invitation.id,
-            status: 'pending_invitation',
+        // Try to send invitation email
+        try {
+          await InvitationService.sendInvitationEmail({
+            email,
+            inviterName,
+            organizationName: organization?.name || 'the organization',
+            token,
           })
-        
-        if (placeholderError) {
-          console.error('Error creating placeholder record:', placeholderError)
-          // Don't return error as invitation was created successfully
+        } catch (emailError) {
+          console.error('Error sending invitation email:', emailError)
+          // Don't fail the whole operation if email fails
+          // The invitation is already created in the database
+          return { 
+            success: true, 
+            warning: 'Invitation created but email could not be sent. You can resend it later.' 
+          }
         }
+        
+        // Don't create a placeholder organization_users record
+        // The invitation_tokens table is the source of truth for pending invitations
       } catch (error) {
         console.error('Error creating invitation:', error)
-        return { error: 'Failed to create and send invitation' }
+        return { error: 'Failed to create invitation' }
       }
     }
     
@@ -297,13 +345,48 @@ export async function removeMember(organizationId: string, memberId: string) {
   }
 }
 
-export async function cancelInvitation(organizationId: string, memberId: string) {
-  // For now, this is the same as removing a member
-  // In a real implementation, you'd cancel the invitation token
-  return removeMember(organizationId, memberId)
+export async function cancelInvitation(organizationId: string, invitationId: string) {
+  try {
+    const supabase = await createClient()
+    
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'Unauthorized' }
+    
+    // Check if user has permission
+    const { data: currentUserMembership } = await supabase
+      .from('organization_users')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', user.id)
+      .single()
+    
+    if (!currentUserMembership || !['owner', 'admin'].includes(currentUserMembership.role)) {
+      return { error: 'You do not have permission to cancel invitations' }
+    }
+    
+    // Delete the invitation token
+    const { error: deleteError } = await supabase
+      .from('invitation_tokens')
+      .delete()
+      .eq('id', invitationId)
+      .eq('organization_id', organizationId)
+      .is('accepted_at', null)
+    
+    if (deleteError) {
+      console.error('Error canceling invitation:', deleteError)
+      return { error: 'Failed to cancel invitation' }
+    }
+    
+    revalidatePath('/settings/team')
+    return { success: true }
+  } catch (error) {
+    console.error('Error canceling invitation:', error)
+    return { error: 'An unexpected error occurred' }
+  }
 }
 
-export async function resendInvitation(organizationId: string, memberId: string) {
+export async function resendInvitation(organizationId: string, invitationId: string) {
   try {
     const supabase = await createClient()
     
@@ -324,20 +407,41 @@ export async function resendInvitation(organizationId: string, memberId: string)
     }
     
     // Get the invitation details
-    const { data: member } = await supabase
-      .from('organization_users')
-      .select('*, invitation_token_id')
-      .eq('id', memberId)
-      .eq('status', 'pending_invitation')
+    const { data: invitation } = await supabase
+      .from('invitation_tokens')
+      .select('*')
+      .eq('id', invitationId)
+      .eq('organization_id', organizationId)
+      .is('accepted_at', null)
       .single()
     
-    if (!member || !member.invitation_token_id) {
+    if (!invitation) {
       return { error: 'Invitation not found' }
     }
     
-    // Resend the invitation using the service
-    await InvitationService.resendInvitation(member.invitation_token_id)
+    // Get organization and inviter details for the email
+    const { data: organization } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', organizationId)
+      .single()
     
+    const { data: inviter } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', user.id)
+      .single()
+    
+    // Resend the invitation email
+    await InvitationService.sendInvitationEmail({
+      email: invitation.email,
+      inviterName: inviter?.email || 'A team member',
+      organizationName: organization?.name || 'the organization',
+      token: invitation.token,
+      customMessage: invitation.custom_message,
+    })
+    
+    revalidatePath('/settings/team')
     return { success: true }
   } catch (error) {
     console.error('Error resending invitation:', error)

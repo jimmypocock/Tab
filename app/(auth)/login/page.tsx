@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -29,15 +30,25 @@ export default function LoginPage() {
     if (urlError) {
       setError(urlError)
     }
+
+    // Check for email confirmation
+    if (searchParams.get('emailConfirmed') === 'true') {
+      setSuccess('Email confirmed! Please sign in to access your dashboard.')
+      // Clean up the URL
+      const url = new URL(window.location.href)
+      url.searchParams.delete('emailConfirmed')
+      window.history.replaceState({}, '', url.pathname)
+    }
   }, [searchParams, router, supabase.auth])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setSuccess(null)
     setLoading(true)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
@@ -45,8 +56,21 @@ export default function LoginPage() {
       if (error) {
         setError(error.message)
       } else {
+        // Check if user has any organizations
+        const { data: userOrgs } = await supabase
+          .from('organization_users')
+          .select('organization_id')
+          .eq('user_id', data.user.id)
+          .eq('status', 'active')
+          .limit(1)
+
         // Force a hard refresh to ensure auth state is updated
-        window.location.href = '/dashboard'
+        // Redirect based on organization status
+        if (!userOrgs || userOrgs.length === 0) {
+          window.location.href = '/organizations'
+        } else {
+          window.location.href = '/dashboard'
+        }
       }
     } catch (err) {
       setError('An unexpected error occurred')
@@ -107,6 +131,16 @@ export default function LoginPage() {
               />
             </div>
           </div>
+
+          {success && (
+            <div className="rounded-md bg-green-50 p-4">
+              <div className="flex">
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-green-800">{success}</h3>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-md bg-red-50 p-4">

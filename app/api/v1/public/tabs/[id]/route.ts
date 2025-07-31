@@ -18,7 +18,7 @@ export async function GET(
   const { id } = await params
   
   try {
-    // Fetch tab with merchant info (no auth required for public payment page)
+    // Fetch tab with merchant info and billing groups (no auth required for public payment page)
     const result = await db.query.tabs.findFirst({
       where: eq(tabs.id, id),
       with: {
@@ -32,6 +32,10 @@ export async function GET(
             businessName: true,
             // Don't expose sensitive merchant data
           },
+        },
+        billingGroups: {
+          where: (billingGroups, { eq }) => eq(billingGroups.status, 'active'),
+          orderBy: (billingGroups, { asc }) => [asc(billingGroups.groupNumber)],
         },
       },
     })
@@ -62,6 +66,17 @@ export async function GET(
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         total: item.total,
+        billingGroupId: item.billingGroupId,
+      })),
+      billingGroups: result.billingGroups?.map(group => ({
+        id: group.id,
+        name: group.name,
+        groupNumber: group.groupNumber,
+        groupType: group.groupType,
+        payerEmail: group.payerEmail,
+        currentBalance: group.currentBalance,
+        depositAmount: group.depositAmount,
+        depositApplied: group.depositApplied,
       })),
       merchant: {
         email: result.merchant.email,

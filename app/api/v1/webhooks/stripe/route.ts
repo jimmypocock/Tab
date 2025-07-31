@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client'
 import { payments, tabs } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { logger } from '@/lib/logger'
+import { PaymentAllocationService } from '@/lib/services/payment-allocation.service'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
@@ -101,6 +102,26 @@ export async function POST(request: NextRequest) {
           tabId: payment.tabId,
           billingGroupId: payment.billingGroupId
         })
+        
+        // Allocate payment to billing groups if specified
+        if (session.metadata?.billingGroupIds || session.metadata?.selectedGroups) {
+          try {
+            await PaymentAllocationService.allocatePaymentFromCheckout(
+              payment.id,
+              session.metadata
+            )
+            logger.info('Payment allocated to billing groups', {
+              paymentId: payment.id,
+              billingGroupIds: session.metadata.billingGroupIds || session.metadata.selectedGroups
+            })
+          } catch (error) {
+            logger.error('Failed to allocate payment to billing groups', error as Error, {
+              paymentId: payment.id,
+              metadata: session.metadata
+            })
+            // Continue processing - payment is still recorded
+          }
+        }
         
         // Tab and billing group balances are automatically updated via database triggers
         logger.info('Payment processed successfully - balances will be updated automatically', {
@@ -213,6 +234,20 @@ export async function POST(request: NextRequest) {
           })
 
           if (payment) {
+            // Reverse billing group allocations if they exist
+            if (payment.metadata?.billingGroupAllocations) {
+              try {
+                await PaymentAllocationService.reversePaymentAllocation(payment.id)
+                logger.info('Payment allocation reversed for refund', {
+                  paymentId: payment.id
+                })
+              } catch (error) {
+                logger.error('Failed to reverse payment allocation', error as Error, {
+                  paymentId: payment.id
+                })
+              }
+            }
+
             const tab = await db.query.tabs.findFirst({
               where: (tabs, { eq }) => eq(tabs.id, payment.tabId),
             })

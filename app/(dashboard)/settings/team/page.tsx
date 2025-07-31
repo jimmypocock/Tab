@@ -19,6 +19,8 @@ type TeamMember = {
   title?: string
   joinedAt?: string
   invitedAt?: string
+  invitationId?: string
+  expiresAt?: string
 }
 
 const roleDescriptions = {
@@ -164,11 +166,15 @@ export default function TeamSettingsPage() {
     }
   }
 
-  const handleCancelInvitation = async (memberId: string) => {
+  const handleCancelInvitation = async (invitationId: string) => {
     if (!currentOrganization?.id) return
     
+    if (!confirm('Are you sure you want to cancel this invitation?')) {
+      return
+    }
+    
     try {
-      const result = await cancelInvitation(currentOrganization.id, memberId)
+      const result = await cancelInvitation(currentOrganization.id, invitationId)
       if (result.error) {
         showToast({
           type: 'error',
@@ -192,11 +198,11 @@ export default function TeamSettingsPage() {
     }
   }
 
-  const handleResendInvitation = async (memberId: string) => {
+  const handleResendInvitation = async (invitationId: string) => {
     if (!currentOrganization?.id) return
     
     try {
-      const result = await resendInvitation(currentOrganization.id, memberId)
+      const result = await resendInvitation(currentOrganization.id, invitationId)
       if (result.error) {
         showToast({
           type: 'error',
@@ -359,13 +365,13 @@ export default function TeamSettingsPage() {
                           {member.status === 'pending_invitation' ? (
                             <>
                               <button
-                                onClick={() => handleResendInvitation(member.id)}
+                                onClick={() => handleResendInvitation(member.invitationId || member.id)}
                                 className="text-sm text-indigo-600 hover:text-indigo-900"
                               >
                                 Resend
                               </button>
                               <button
-                                onClick={() => handleCancelInvitation(member.id)}
+                                onClick={() => handleCancelInvitation(member.invitationId || member.id)}
                                 className="text-sm text-red-600 hover:text-red-900"
                               >
                                 Cancel

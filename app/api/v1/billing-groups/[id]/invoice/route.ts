@@ -1,151 +1,149 @@
-import { NextRequest } from 'next/server'
-import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
-import { parseJsonBody } from '@/lib/api/middleware'
-import { createBillingGroupInvoiceSchema, validateInput } from '@/lib/api/validation'
+import { NextRequest, NextResponse } from 'next/server'
+import { withApiAuth } from '@/lib/api/middleware'
+import { z } from 'zod'
 import { InvoiceService } from '@/lib/services/invoice.service'
-import { 
-  ApiResponseBuilder,
-  createSuccessResponse 
-} from '@/lib/api/response'
-import { 
-  NotFoundError,
-  ValidationError,
-  DatabaseError
-} from '@/lib/errors'
+import { BillingGroupService } from '@/lib/services/billing-group.service'
 import { logger } from '@/lib/logger'
+import { ApiResponseBuilder } from '@/lib/api/response'
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
-    const billingGroupId = params.id
+// Validation schema for creating invoice from billing group
+const createInvoiceSchema = z.object({
+  due_date: z.string().datetime(),
+  payment_terms: z.string().optional(),
+  notes: z.string().optional(),
+  include_unassigned_items: z.boolean().optional().default(false),
+  send_email: z.boolean().optional().default(false),
+  billing_address: z.object({
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    state: z.string().optional(),
+    postal_code: z.string().optional(),
+    country: z.string(),
+  }).optional(),
+  shipping_address: z.object({
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    state: z.string().optional(),
+    postal_code: z.string().optional(),
+    country: z.string(),
+  }).optional(),
+})
+
+// POST /api/v1/billing-groups/:id/invoice - Create invoice from billing group
+export const POST = withApiAuth(async (req, context) => {
+  const { id } = await context.params
+  
+  try {
+    const body = await req.json()
+    const validatedData = createInvoiceSchema.parse(body)
     
-    try {
-      // Parse and validate request body
-      const body = await parseJsonBody(req)
-      
-      const validation = validateInput(createBillingGroupInvoiceSchema, {
-        ...body,
-        billingGroupId, // Inject billing group ID from URL
-      })
-      
-      if (!validation.success) {
-        throw new ValidationError('Invalid request data', validation.error.issues)
-      }
-
-      const data = validation.data
-
-      // Create invoice for the billing group
-      const invoice = await InvoiceService.createBillingGroupInvoice({
-        billingGroupId,
-        organizationId: context.organizationId,
-        dueDate: new Date(data.dueDate),
-        paymentTerms: data.paymentTerms,
-        notes: data.notes,
-        includeUnassignedItems: data.includeUnassignedItems,
-        billingAddress: data.billingAddress,
-        shippingAddress: data.shippingAddress,
-      })
-
-      // Send invoice immediately if requested
-      if (data.sendImmediately) {
-        try {
-          await InvoiceService.sendInvoice(invoice.id, {
-            message: data.notes,
-          })
-          
-          logger.info('Billing group invoice sent immediately', {
-            invoiceId: invoice.id,
-            billingGroupId,
-            organizationId: context.organizationId,
-          })
-        } catch (sendError) {
-          logger.warn('Failed to send invoice immediately', {
-            invoiceId: invoice.id,
-            billingGroupId,
-            error: sendError,
-          })
-          // Don't fail the invoice creation if sending fails
-        }
-      }
-
-      return new ApiResponseBuilder()
-        .setData({
-          invoice,
-          message: data.sendImmediately 
-            ? 'Billing group invoice created and sent successfully'
-            : 'Billing group invoice created successfully'
-        })
-        .setStatusCode(201)
-        .build()
-        
-    } catch (error) {
-      if (error instanceof NotFoundError || 
-          error instanceof ValidationError) {
-        throw error
-      }
-      
-      logger.error('Failed to create billing group invoice', error as Error, {
-        billingGroupId,
-        organizationId: context.organizationId,
-      })
-      
-      throw new DatabaseError('Failed to create billing group invoice', error)
-    }
-  }, {
-    requiredScope: 'merchant'
-  })
-}
-
-// Get invoice information for a billing group
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  return withOrganizationAuth(request, async (_req: NextRequest, context: OrganizationContext) => {
-    const billingGroupId = params.id
-    
-    try {
-      // Get invoicable billing groups for the tab this group belongs to
-      const billingGroups = await InvoiceService.getInvoicableBillingGroups(
-        billingGroupId, // This needs to be updated to get tab ID first
-        context.organizationId
+    // Verify billing group exists and belongs to merchant
+    const billingGroup = await BillingGroupService.getBillingGroupById(id)
+    if (!billingGroup) {
+      return NextResponse.json(
+        { error: 'Billing group not found' },
+        { status: 404 }
       )
-      
-      const billingGroup = billingGroups.find(bg => bg.id === billingGroupId)
-      
-      if (!billingGroup) {
-        throw new NotFoundError('Billing group not found or cannot be invoiced')
-      }
-
-      return new ApiResponseBuilder()
-        .setData({
-          billingGroup,
-          canInvoice: billingGroup.canInvoice,
-          lineItemsCount: billingGroup.lineItemsCount,
-          totalAmount: billingGroup.totalAmount,
-        })
-        .build()
-        
-    } catch (error) {
-      if (error instanceof NotFoundError) {
-        throw error
-      }
-      
-      logger.error('Failed to get billing group invoice info', error as Error, {
-        billingGroupId,
-        organizationId: context.organizationId,
-      })
-      
-      throw new DatabaseError('Failed to get billing group invoice info', error)
     }
-  }, {
-    requiredScope: 'merchant'
-  })
-}
-
-// Handle OPTIONS for CORS
-export async function OPTIONS(_request: NextRequest) {
-  return createSuccessResponse({}, undefined, 204)
-}
+    
+    // Verify the billing group belongs to a tab owned by this merchant
+    if (!billingGroup.tab || billingGroup.tab.merchantId !== context.merchant.id) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      )
+    }
+    
+    // Create invoice for billing group
+    const invoice = await InvoiceService.createBillingGroupInvoice({
+      billingGroupId: id,
+      organizationId: context.merchant.id,
+      dueDate: new Date(validatedData.due_date),
+      paymentTerms: validatedData.payment_terms,
+      notes: validatedData.notes,
+      billingAddress: validatedData.billing_address,
+      shippingAddress: validatedData.shipping_address,
+      includeUnassignedItems: validatedData.include_unassigned_items,
+    })
+    
+    logger.info('Invoice created from billing group', {
+      invoiceId: invoice.id,
+      billingGroupId: id,
+      merchantId: context.merchant.id,
+      sendEmail: validatedData.send_email,
+    })
+    
+    // Send invoice email if requested
+    if (validatedData.send_email) {
+      try {
+        await InvoiceService.sendInvoiceEmail(invoice.id, context.merchant.id)
+        logger.info('Invoice email sent', {
+          invoiceId: invoice.id,
+          customerEmail: invoice.customerEmail,
+        })
+      } catch (error) {
+        logger.error('Failed to send invoice email', error as Error, {
+          invoiceId: invoice.id,
+        })
+        // Don't fail the request if email fails
+      }
+    }
+    
+    // Transform to API format
+    const apiInvoice = {
+      id: invoice.id,
+      invoice_number: invoice.invoiceNumber,
+      status: invoice.status,
+      issue_date: invoice.issueDate.toISOString(),
+      due_date: invoice.dueDate.toISOString(),
+      customer_email: invoice.customerEmail,
+      customer_name: invoice.customerName,
+      customer_organization_id: invoice.customerOrganizationId,
+      subtotal: invoice.subtotal,
+      tax_amount: invoice.taxAmount,
+      total_amount: invoice.totalAmount,
+      paid_amount: invoice.paidAmount,
+      balance_due: invoice.balanceDue,
+      currency: invoice.currency,
+      payment_terms: invoice.paymentTerms,
+      public_url: `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${invoice.publicUrl}`,
+      metadata: invoice.metadata,
+      billing_group: {
+        id: billingGroup.id,
+        name: billingGroup.name,
+        group_type: billingGroup.groupType,
+        payer_email: billingGroup.payerEmail,
+      },
+      created_at: invoice.createdAt.toISOString(),
+      updated_at: invoice.updatedAt.toISOString(),
+    }
+    
+    return new ApiResponseBuilder()
+      .setData(apiInvoice)
+      .setMeta({ message: 'Invoice created successfully' })
+      .build()
+      
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { 
+          error: 'Validation error', 
+          details: error.flatten().fieldErrors 
+        },
+        { status: 400 }
+      )
+    }
+    
+    logger.error('Error creating invoice from billing group', error as Error, {
+      billingGroupId: id,
+      merchantId: context.merchant.id,
+    })
+    
+    return NextResponse.json(
+      { error: 'Failed to create invoice' },
+      { status: 500 }
+    )
+  }
+})

@@ -40,13 +40,10 @@ const config: Config = {
     '/__tests__/test-env-setup.js',
     '/__tests__/helpers/',
     '/__tests__/__mocks__/',
-    '/e2e/', // Exclude Playwright tests
-    '/__tests__/__mocks__/', // Exclude mock files from test discovery
     '/__tests__/mocks/', // Exclude MSW mocks
-    '/__tests__/helpers/', // Exclude helper files
   ],
   transformIgnorePatterns: [
-    'node_modules/(?!(isows|@supabase|@tanstack|@headlessui|stripe|lucide-react|clsx|tailwind-merge|uncrypto|@upstash|msw|@bundled-es-modules)/)',
+    'node_modules/(?!(isows|@supabase|@tanstack|@headlessui|stripe|lucide-react|clsx|tailwind-merge|uncrypto|@upstash|msw|@bundled-es-modules|nanoid)/)',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node', 'mjs'],
   resolver: undefined, // Use Next.js resolver

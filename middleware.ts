@@ -64,6 +64,28 @@ export async function middleware(request: NextRequest) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url))
     }
+
+    // Check if user has any organizations
+    const { data: userOrgs } = await supabase
+      .from('organization_users')
+      .select('organization_id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .limit(1)
+
+    // If no organizations, redirect to organization selection page
+    if (!userOrgs || userOrgs.length === 0) {
+      return NextResponse.redirect(new URL('/organizations', request.url))
+    }
+  }
+
+  // Organizations page - require auth
+  if (request.nextUrl.pathname.startsWith('/organizations')) {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
   }
 
   return response

@@ -41,6 +41,28 @@ if (typeof window !== 'undefined') {
       dispatchEvent: jest.fn(),
     })),
   })
+  
+  // Mock window.location for navigation tests
+  delete (window as any).location
+  window.location = {
+    href: 'http://localhost/',
+    origin: 'http://localhost',
+    protocol: 'http:',
+    host: 'localhost',
+    hostname: 'localhost',
+    port: '',
+    pathname: '/',
+    search: '',
+    hash: '',
+    assign: jest.fn(),
+    replace: jest.fn(),
+    reload: jest.fn(),
+    toString: jest.fn(() => 'http://localhost/'),
+  } as any
+  
+  // Mock window.confirm and window.alert
+  window.confirm = jest.fn(() => true)
+  window.alert = jest.fn()
 }
 
 // Mock Web APIs for Node.js environment
@@ -555,14 +577,45 @@ jest.mock('@/lib/db', () => {
 // Mock withApiAuth for all tests
 jest.mock('@/lib/api/middleware', () => ({
   withApiAuth: jest.fn((handler) => {
-    return async (req: any, context: any, params: any) => {
+    // Return a function that can handle both 2 and 3 argument patterns
+    return async function(this: any, ...args: any[]) {
+      const req = args[0]
+      let context: any
+      let params: any
+      
+      // Determine if we're using 2 or 3 argument pattern
+      if (args.length === 3) {
+        // Pattern: (req, context, { params })
+        context = args[1]
+        params = args[2]?.params || args[2]
+      } else if (args.length === 2) {
+        // Pattern: (req, { params }) or (req, context)
+        if (args[1]?.params !== undefined) {
+          // Has params property
+          context = {}
+          params = await args[1].params
+        } else {
+          // It's a context object
+          context = args[1]
+          params = context?.params
+        }
+      }
+      
       const mockApiContext = {
-        organizationId: 'org_123',
+        merchant: context?.merchant || { id: 'merchant_123' },
+        organizationId: context?.organizationId || 'org_123',
         apiKeyId: 'key_123', 
         requestId: 'req_123',
-        environment: 'test' as const
+        environment: 'test' as const,
+        params
       }
-      return handler(req, mockApiContext, params)
+      
+      // Call handler with the same number of arguments it expects
+      if (handler.length === 3) {
+        return handler(req, mockApiContext, { params })
+      } else {
+        return handler(req, mockApiContext)
+      }
     }
   }),
   parseJsonBody: jest.fn(async (req: any) => {

@@ -84,7 +84,27 @@ Tab is an easy-to-use API that allows businesses to create tabs, send invoices, 
    - Run migrations: `npm run db:push`
    - Add RLS policies (see below)
 
-6. **Webhook Setup for Local Development**
+6. **Database Data Management**
+   
+   **Dump Current Database Data**
+   ```bash
+   # Create a dump of all current data
+   npm run supabase:dump-data
+   ```
+   This creates `supabase/seed-data.sql` with all your test data.
+   
+   **Restore Data After Database Reset**
+   ```bash
+   # Option 1: Just load the data
+   npm run supabase:load-data
+   
+   # Option 2: Reset database and restore data in one command
+   npm run supabase:reset:with-data
+   ```
+   
+   This is useful for preserving test data between database resets during development.
+
+7. **Webhook Setup for Local Development**
    
    The app automatically configures webhooks when you add a payment processor, but this requires a publicly accessible URL. For local development, you have two options:
    
@@ -110,14 +130,14 @@ Tab is an easy-to-use API that allows businesses to create tabs, send invoices, 
    
    With this setup, webhooks will be automatically configured in Stripe when you add it as a payment processor through the dashboard.
 
-7. **Run the development server**
+8. **Run the development server**
    ```bash
    npm run dev
    ```
 
    Open [http://localhost:1235](http://localhost:1235)
 
-8. **Test API Keys for Development**
+9. **Test API Keys for Development**
    
    For local testing without setting up payment processors:
    ```

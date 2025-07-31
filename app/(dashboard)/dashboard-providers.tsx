@@ -1,6 +1,5 @@
 'use client'
 
-import { ToastProvider } from '@/lib/toast/toast-context'
 import { OrganizationProvider } from '@/components/dashboard/organization-context'
 
 interface DashboardProvidersProps {
@@ -10,6 +9,8 @@ interface DashboardProvidersProps {
   organizations: any[]
 }
 
+// Only dashboard-specific providers go here
+// Global providers (Toast, QueryClient) are now in app/providers.tsx
 export function DashboardProviders({ 
   children, 
   currentOrganization,
@@ -17,14 +18,12 @@ export function DashboardProviders({
   organizations
 }: DashboardProvidersProps) {
   return (
-    <ToastProvider>
-      <OrganizationProvider
-        currentOrganization={currentOrganization}
-        userRole={userRole}
-        organizations={organizations}
-      >
-        {children}
-      </OrganizationProvider>
-    </ToastProvider>
+    <OrganizationProvider
+      currentOrganization={currentOrganization}
+      userRole={userRole}
+      organizations={organizations}
+    >
+      {children}
+    </OrganizationProvider>
   )
 }

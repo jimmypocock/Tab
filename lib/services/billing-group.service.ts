@@ -95,6 +95,24 @@ export class BillingGroupService {
   }
 
   /**
+   * Get a single billing group by ID
+   */
+  static async getBillingGroupById(id: string): Promise<BillingGroupWithRelations | undefined> {
+    const billingGroup = await db.query.billingGroups.findFirst({
+      where: eq(billingGroups.id, id),
+      with: {
+        payerOrganization: true,
+        rules: { where: eq(billingGroupRules.isActive, true) },
+        lineItems: true,
+        invoice: true,
+        tab: true,
+      },
+    })
+    
+    return billingGroup
+  }
+
+  /**
    * Get billing groups for a tab or invoice
    */
   static async getBillingGroups(params: {

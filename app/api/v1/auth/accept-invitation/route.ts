@@ -4,8 +4,13 @@ import { createClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
+  let token: string | undefined
+  let userId: string | undefined
+  
   try {
-    const { token, userId } = await request.json()
+    const body = await request.json()
+    token = body.token
+    userId = body.userId
 
     if (!token || !userId) {
       return NextResponse.json(

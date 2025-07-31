@@ -10,6 +10,14 @@ const nextConfig = {
   poweredByHeader: false,
   // Enable strict mode for better performance
   reactStrictMode: true,
+  // Configure allowed origins for development
+  experimental: {
+    serverActions: {
+      allowedOrigins: process.env.NODE_ENV === 'development' 
+        ? ['localhost:1235', '*.ngrok-free.app', '*.ngrok.io']
+        : undefined,
+    },
+  },
   // Configure headers for better caching and security
   async headers() {
     return [

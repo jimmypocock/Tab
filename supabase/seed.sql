@@ -1,162 +1,220 @@
--- Seed data for local development
--- This file contains test data to help with local development
+-- Clean seed data for the new organization flow
+-- Users are created without organizations
 
--- Create test users
-INSERT INTO auth.users (id, email, raw_user_meta_data, created_at, updated_at)
-VALUES 
-  ('550e8400-e29b-41d4-a716-446655440001', 'test@example.com', '{"business_name": "Test Business Inc"}', NOW(), NOW()),
-  ('550e8400-e29b-41d4-a716-446655440002', 'demo@example.com', '{"business_name": "Demo Company LLC"}', NOW(), NOW())
-ON CONFLICT (id) DO NOTHING;
+-- Create test users with passwords directly in auth.users
+INSERT INTO auth.users (
+  instance_id,
+  id,
+  aud,
+  role,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  confirmation_token,
+  invited_at,
+  confirmation_sent_at,
+  recovery_token,
+  recovery_sent_at,
+  email_change_token_new,
+  email_change,
+  email_change_sent_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at,
+  phone,
+  phone_confirmed_at,
+  phone_change,
+  phone_change_token,
+  phone_change_sent_at
+) VALUES 
+-- User with organization
+(
+  '00000000-0000-0000-0000-000000000000',
+  '550e8400-e29b-41d4-a716-446655440001',
+  'authenticated',
+  'authenticated',
+  'owner@example.com',
+  crypt('password123', gen_salt('bf')),
+  NOW(),
+  '',
+  NULL,
+  NULL,
+  '',
+  NULL,
+  '',
+  '',
+  NULL,
+  '{}',
+  '{"first_name": "Business", "last_name": "Owner"}',
+  NOW(),
+  NOW(),
+  NULL,
+  NULL,
+  '',
+  '',
+  NULL
+),
+-- User without organization (new signup)
+(
+  '00000000-0000-0000-0000-000000000000',
+  '550e8400-e29b-41d4-a716-446655440002',
+  'authenticated',
+  'authenticated',
+  'newuser@example.com',
+  crypt('password123', gen_salt('bf')),
+  NOW(),
+  '',
+  NULL,
+  NULL,
+  '',
+  NULL,
+  '',
+  '',
+  NULL,
+  '{}',
+  '{"first_name": "New", "last_name": "User"}',
+  NOW(),
+  NOW(),
+  NULL,
+  NULL,
+  '',
+  '',
+  NULL
+),
+-- Another user without organization
+(
+  '00000000-0000-0000-0000-000000000000',
+  '550e8400-e29b-41d4-a716-446655440003',
+  'authenticated',
+  'authenticated',
+  'solo@example.com',
+  crypt('password123', gen_salt('bf')),
+  NOW(),
+  '',
+  NULL,
+  NULL,
+  '',
+  NULL,
+  '',
+  '',
+  NULL,
+  '{}',
+  '{"first_name": "Solo", "last_name": "User"}',
+  NOW(),
+  NOW(),
+  NULL,
+  NULL,
+  '',
+  '',
+  NULL
+)
+ON CONFLICT (id) DO UPDATE SET
+  encrypted_password = EXCLUDED.encrypted_password,
+  email_confirmed_at = EXCLUDED.email_confirmed_at;
 
--- The handle_new_user trigger will automatically create:
--- 1. Records in the users table
--- 2. Organizations for each user
--- 3. Organization_users relationships
+-- The handle_new_user trigger will create user records in public.users
+-- But NOT create organizations anymore
 
--- Wait a bit for triggers to complete
+-- Wait for triggers
 SELECT pg_sleep(0.1);
 
--- Get the organization IDs that were created
-DO $$
-DECLARE
-  test_org_id UUID;
-  demo_org_id UUID;
-BEGIN
-  -- Get Test Business Inc organization
-  SELECT id INTO test_org_id FROM organizations WHERE name = 'Test Business Inc' LIMIT 1;
-  
-  -- Get Demo Company LLC organization
-  SELECT id INTO demo_org_id FROM organizations WHERE name = 'Demo Company LLC' LIMIT 1;
+-- Create one organization manually
+INSERT INTO organizations (
+  id,
+  name,
+  slug,
+  type,
+  is_merchant,
+  is_corporate,
+  primary_email,
+  created_by,
+  created_at,
+  updated_at
+) VALUES (
+  '5c8a50c0-51f9-4242-a0ed-42b5a23818c8',
+  'Acme Corporation',
+  'acme-corporation',
+  'business',
+  true,
+  false,
+  'owner@example.com',
+  '550e8400-e29b-41d4-a716-446655440001',
+  NOW(),
+  NOW()
+);
 
-  -- Create test API keys if organizations exist
-  IF test_org_id IS NOT NULL THEN
-    -- Test API Key 1: tab_test_12345678901234567890123456789012
-    INSERT INTO api_keys (id, organization_id, key_hash, key_prefix, name, scope, is_active, created_at)
-    VALUES (
-      '660e8400-e29b-41d4-a716-446655440001',
-      test_org_id,
-      encode(sha256('tab_test_12345678901234567890123456789012'::bytea), 'hex'),
-      'tab_test',
-      'Development API Key',
-      'merchant',
-      true,
-      NOW()
-    )
-    ON CONFLICT (id) DO NOTHING;
+-- Add the owner to the organization
+INSERT INTO organization_users (
+  organization_id,
+  user_id,
+  role,
+  status,
+  joined_at
+) VALUES (
+  '5c8a50c0-51f9-4242-a0ed-42b5a23818c8',
+  '550e8400-e29b-41d4-a716-446655440001',
+  'owner',
+  'active',
+  NOW()
+);
 
-    -- Create sample tabs for test organization
-    INSERT INTO tabs (id, organization_id, customer_email, customer_name, status, currency, subtotal, tax_amount, total_amount, paid_amount, created_at, updated_at)
-    VALUES 
-      (
-        '770e8400-e29b-41d4-a716-446655440001',
-        test_org_id,
-        'customer1@example.com',
-        'John Doe',
-        'open',
-        'USD',
-        100.00,
-        8.00,
-        108.00,
-        0.00,
-        NOW() - INTERVAL '5 days',
-        NOW() - INTERVAL '5 days'
-      ),
-      (
-        '770e8400-e29b-41d4-a716-446655440002',
-        test_org_id,
-        'customer2@example.com',
-        'Jane Smith',
-        'paid',
-        'USD',
-        250.00,
-        20.00,
-        270.00,
-        270.00,
-        NOW() - INTERVAL '3 days',
-        NOW() - INTERVAL '2 days'
-      )
-    ON CONFLICT (id) DO NOTHING;
+-- Create an API key for the organization
+INSERT INTO api_keys (
+  id,
+  organization_id,
+  key_hash,
+  key_prefix,
+  last_four,
+  name,
+  scope,
+  is_active,
+  created_at,
+  created_by
+) VALUES (
+  '660e8400-e29b-41d4-a716-446655440001',
+  '5c8a50c0-51f9-4242-a0ed-42b5a23818c8',
+  encode(sha256('tab_test_12345678901234567890123456789012'::bytea), 'hex'),
+  'tab_test',
+  '9012',
+  'Development API Key',
+  'full',
+  true,
+  NOW(),
+  '550e8400-e29b-41d4-a716-446655440001'
+);
 
-    -- Create line items for first tab
-    INSERT INTO line_items (tab_id, description, quantity, unit_price, total, created_at)
-    VALUES 
-      ('770e8400-e29b-41d4-a716-446655440001', 'Product A', 2, 30.00, 60.00, NOW() - INTERVAL '5 days'),
-      ('770e8400-e29b-41d4-a716-446655440001', 'Product B', 1, 40.00, 40.00, NOW() - INTERVAL '5 days')
-    ON CONFLICT DO NOTHING;
-  END IF;
-
-  IF demo_org_id IS NOT NULL THEN
-    -- Demo API Key: tab_test_98765432109876543210987654321098
-    INSERT INTO api_keys (id, organization_id, key_hash, key_prefix, name, scope, is_active, created_at)
-    VALUES (
-      '660e8400-e29b-41d4-a716-446655440002',
-      demo_org_id,
-      encode(sha256('tab_test_98765432109876543210987654321098'::bytea), 'hex'),
-      'tab_test',
-      'Demo API Key',
-      'merchant',
-      true,
-      NOW()
-    )
-    ON CONFLICT (id) DO NOTHING;
-  END IF;
-
-  -- Create a corporate organization 
-  -- Note: Skip created_by since it references users table which may not be populated yet
-  INSERT INTO organizations (id, name, slug, type, is_merchant, is_corporate, primary_email, created_at, updated_at)
-  VALUES (
-    '880e8400-e29b-41d4-a716-446655440001',
-    'Acme Corporation',
-    'acme-corporation',
-    'business',
-    false,
-    true,
-    'corporate@acme.com',
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT (id) DO NOTHING;
-
-  -- Skip manual organization_users insert - handle_new_user trigger already created the relationships
-
-  -- Create relationship between Demo Company (merchant) and Acme Corporation (corporate)
-  IF demo_org_id IS NOT NULL THEN
-    INSERT INTO organization_relationships (
-      merchant_org_id,
-      corporate_org_id,
-      credit_limit,
-      payment_terms,
-      status,
-      approved_by,
-      approved_at,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      demo_org_id,
-      '880e8400-e29b-41d4-a716-446655440001',
-      10000.00,
-      'NET30',
-      'active',
-      '550e8400-e29b-41d4-a716-446655440002',
-      NOW(),
-      NOW(),
-      NOW()
-    )
-    ON CONFLICT DO NOTHING;
-  END IF;
-END $$;
+-- Create a pending invitation for newuser@example.com
+INSERT INTO invitations (
+  organization_id,
+  invited_by,
+  email,
+  role,
+  token,
+  status,
+  expires_at,
+  created_at
+) VALUES (
+  '5c8a50c0-51f9-4242-a0ed-42b5a23818c8',
+  '550e8400-e29b-41d4-a716-446655440001',
+  'newuser@example.com',
+  'member',
+  encode(gen_random_bytes(32), 'hex'),
+  'pending',
+  NOW() + INTERVAL '7 days',
+  NOW()
+);
 
 -- Add helpful development note
 DO $$
 BEGIN
-  RAISE NOTICE 'Seed data loaded successfully!';
+  RAISE NOTICE 'Clean seed data loaded!';
   RAISE NOTICE '';
-  RAISE NOTICE 'Test API Keys:';
-  RAISE NOTICE '  - Test Business Inc: tab_test_12345678901234567890123456789012';
-  RAISE NOTICE '  - Demo Company LLC: tab_test_98765432109876543210987654321098';
+  RAISE NOTICE 'Test Users (password: password123):';
+  RAISE NOTICE '  - owner@example.com (has organization: Acme Corporation)';
+  RAISE NOTICE '  - newuser@example.com (no org, has pending invitation)';
+  RAISE NOTICE '  - solo@example.com (no org, no invitations)';
   RAISE NOTICE '';
-  RAISE NOTICE 'Test Users:';
-  RAISE NOTICE '  - test@example.com (Test Business Inc - Merchant)';
-  RAISE NOTICE '  - demo@example.com (Demo Company LLC - Merchant & Acme Corporation - Corporate)';
+  RAISE NOTICE 'Test API Key:';
+  RAISE NOTICE '  - Acme Corporation: tab_test_12345678901234567890123456789012';
 END $$;

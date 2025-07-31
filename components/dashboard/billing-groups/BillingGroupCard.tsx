@@ -33,11 +33,57 @@ export function BillingGroupCard({
   onUpdate
 }: BillingGroupCardProps) {
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false)
   const { toast } = useToast()
   
   const totalAmount = lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
   const depositRemaining = group.deposit_amount ? group.deposit_amount - (group.deposit_applied || 0) : 0
   const creditUsage = group.credit_limit ? (group.current_balance / group.credit_limit) * 100 : 0
+
+  const handleCreateInvoice = async () => {
+    setIsCreatingInvoice(true)
+    try {
+      // Calculate due date (30 days from now by default)
+      const dueDate = new Date()
+      dueDate.setDate(dueDate.getDate() + 30)
+      
+      const response = await fetch(`/api/v1/billing-groups/${group.id}/invoice`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          due_date: dueDate.toISOString(),
+          payment_terms: 'Net 30',
+          send_email: true,
+        }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(errorData.error || 'Failed to create invoice')
+      }
+      
+      const data = await response.json()
+      
+      toast({
+        title: 'Invoice Created',
+        description: `Invoice ${data.data.invoice_number} has been created and sent to ${group.payer_email || 'the customer'}.`,
+      })
+      
+      onUpdate()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create invoice'
+      
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      })
+    } finally {
+      setIsCreatingInvoice(false)
+    }
+  }
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this billing group? All items will be unassigned.')) {
@@ -136,6 +182,15 @@ export function BillingGroupCard({
               <DropdownMenuItem>
                 <Edit className="h-4 w-4 mr-2" />
                 Edit Group
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleCreateInvoice()
+                }}
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                Create Invoice
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
