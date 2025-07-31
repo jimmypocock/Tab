@@ -50,7 +50,8 @@ This major milestone enables rapid feature development with confidence!
 
 **Vision**: Transform the hotel-specific folios concept into a flexible "billing groups" system that works across industries - hotels, construction, healthcare, legal, restaurants, and more.
 
-**Business Value**: 
+**Business Value**:
+
 - Enable businesses to split charges across multiple payers (individuals, departments, companies)
 - Automate charge routing based on configurable rules
 - Track deposits and prepayments per billing group
@@ -59,6 +60,7 @@ This major milestone enables rapid feature development with confidence!
 **Status**: ✅ CORE IMPLEMENTATION COMPLETE - Remaining items are enhancements
 
 **Summary of Completion**:
+
 - ✅ Database schema fully implemented and migrated
 - ✅ Backend services with full CRUD, rule engine, and charge routing
 - ✅ Complete API layer with all endpoints implemented
@@ -79,6 +81,7 @@ This major milestone enables rapid feature development with confidence!
    - **Smart defaults** - Intelligent group creation when enabled
 
 2. **Database Design** ✅
+
    ```sql
    -- Core billing_groups table (IMPLEMENTED)
    billing_groups {
@@ -110,7 +113,7 @@ This major milestone enables rapid feature development with confidence!
 
 1. **BillingGroupService** (`/lib/services/billing-group.service.ts`) ✅
    - [x] CRUD operations for billing groups
-   - [x] Rule evaluation engine 
+   - [x] Rule evaluation engine
    - [x] Automatic charge routing based on rules
    - [x] Deposit tracking and application
    - [x] Balance calculations per group
@@ -142,6 +145,7 @@ This major milestone enables rapid feature development with confidence!
 ### Phase 3: API Layer ✅ COMPLETED
 
 1. **New API Endpoints** ✅
+
    ```typescript
    // Billing Groups
    GET    /api/v1/billing-groups              ✅ (with tab_id/invoice_id query)
@@ -186,9 +190,11 @@ This major milestone enables rapid feature development with confidence!
 ### Phase 4: UI Implementation ✅ MOSTLY COMPLETE
 
 1. **Merchant Dashboard - Billing Group Management** ✅ COMPLETED
+
    ```
    Integrated into /dashboard/tabs/[id] (not separate route)
    ```
+
    - [x] Visual billing group cards showing payer info and balance (BillingGroupCard component)
    - [x] Drag-and-drop interface to move charges between groups (LineItemAssignment component)
    - [x] Quick-create billing groups with templates (CreateBillingGroupDialog)
@@ -199,9 +205,11 @@ This major milestone enables rapid feature development with confidence!
    - [x] Audit trail (AuditTrail component)
 
 2. **Point of Sale Integration** 🔴 PARTIAL
+
    ```
    /dashboard/tabs/[id]/add-charge
    ```
+
    - [x] Line item assignment with billing groups
    - [ ] Show auto-assigned billing group with explanation
    - [ ] One-click override with reason tracking
@@ -209,9 +217,11 @@ This major milestone enables rapid feature development with confidence!
    - [ ] Batch charge entry with smart routing
 
 3. **Rule Management Interface** ✅ COMPLETED
+
    ```
    Integrated into billing groups UI (not separate settings page)
    ```
+
    - [x] Visual rule builder (if-then interface) - RuleBuilder component
    - [x] Rule testing/preview - RulePreview component
    - [x] Rules list management - RulesList component
@@ -220,18 +230,22 @@ This major milestone enables rapid feature development with confidence!
    - [ ] Template library for common industries
 
 4. **Organization Billing Rules** 🔴 FUTURE ENHANCEMENT
+
    ```
    /dashboard/settings/billing-relationships
    ```
+
    - [ ] Set rules for direct billing relationships
    - [ ] Approval workflows configuration
    - [ ] Real-time charge monitoring
    - [ ] Spending analytics by category
 
 5. **Guest/Customer View** 🔴 NOT IMPLEMENTED
+
    ```
    /pay/[id] (current basic payment page)
    ```
+
    - [ ] Clear breakdown by billing group
    - [ ] Pay individual group or entire balance
    - [ ] Dispute charges interface
@@ -339,6 +353,7 @@ This major milestone enables rapid feature development with confidence!
 **Final Status**: All critical billing groups features completed!
 
 **Delivered Impact**:
+
 - ✅ Full charge routing automation implemented
 - ✅ Complete rule engine with visual builder
 - ✅ Comprehensive merchant dashboard tools
@@ -348,8 +363,6 @@ This major milestone enables rapid feature development with confidence!
 - ✅ Webhook integration for automatic allocation
 
 ---
-
-## STRATEGIC PIVOT: Multi-Processor Orchestration Platform 🎯
 
 ## STRATEGIC PIVOT: Multi-Processor Orchestration Platform 🎯
 

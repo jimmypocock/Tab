@@ -40,49 +40,25 @@ export default function NewOrganizationPage() {
         return
       }
 
-      // Create organization with proper RLS
-      const slug = formData.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .concat('-', Date.now().toString())
-
-      const { data: organization, error: orgError } = await supabase
-        .from('organizations')
-        .insert({
-          name: formData.name,
-          slug,
-          type: formData.type,
-          is_merchant: formData.is_merchant,
-          is_corporate: formData.is_corporate,
-          primary_email: user.email,
-          created_by: user.id, // This matches auth.uid() due to our trigger
+      // Use the create_organization function to bypass RLS
+      const { data: result, error: orgError } = await supabase
+        .rpc('create_organization', {
+          p_name: formData.name,
+          p_type: formData.type,
+          p_is_merchant: formData.is_merchant,
+          p_is_corporate: formData.is_corporate,
         })
-        .select()
-        .single()
 
       if (orgError) {
         console.error('Error creating organization:', orgError)
         throw new Error(orgError.message || 'Failed to create organization')
       }
 
-      // Add user as owner
-      const { error: memberError } = await supabase
-        .from('organization_users')
-        .insert({
-          organization_id: organization.id,
-          user_id: user.id,
-          role: 'owner',
-          status: 'active',
-          joined_at: new Date().toISOString(),
-        })
-
-      if (memberError) {
-        console.error('Error adding user to organization:', memberError)
-        // Try to clean up the organization
-        await supabase.from('organizations').delete().eq('id', organization.id)
-        throw new Error('Failed to add you to the organization')
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create organization')
       }
+
+      const organization = result.organization
 
       showToast({
         type: 'success',
