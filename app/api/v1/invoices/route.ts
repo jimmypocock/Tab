@@ -1,110 +1,95 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
-import { db } from '@/lib/db'
-import { invoices } from '@/lib/db/schema'
-import { InvoiceService } from '@/lib/services/invoice.service'
-import { eq, desc } from 'drizzle-orm'
-import { z } from 'zod'
-import { ApiResponseBuilder } from '@/lib/api/response'
-import { logger } from '@/lib/logger'
+/**
+ * Invoice Routes - Refactored with DI Pattern
+ */
 
-// Create invoice validation schema
+import { NextRequest } from 'next/server'
+import { withMerchantDI } from '@/lib/api/di-middleware'
+import { validateInput } from '@/lib/api/validation'
+import { ApiResponseBuilder } from '@/lib/api/response'
+import { CacheConfigs } from '@/lib/api/cache'
+import { ValidationError } from '@/lib/errors'
+import { parseJsonBody } from '@/lib/api/middleware'
+import { z } from 'zod'
+
 const createInvoiceSchema = z.object({
-  tabId: z.string().uuid().optional(),
-  billingGroupId: z.string().uuid().optional(), // Support billing group invoices
-  lineItemIds: z.array(z.string().uuid()).optional(),
-  customerEmail: z.string().email().optional(),
-  customerName: z.string().optional(),
-  lineItems: z.array(z.object({
-    description: z.string(),
-    quantity: z.number().positive(),
-    unitPrice: z.number().positive(),
-    category: z.string().optional(),
-    metadata: z.record(z.any()).optional(),
-  })).optional(),
-  dueDate: z.string().transform(val => new Date(val)),
-  paymentTerms: z.string().optional(),
+  tabId: z.string().uuid(),
+  billingGroupId: z.string().uuid().optional(),
+  dueDate: z.string().transform(val => new Date(val)).optional(),
   notes: z.string().optional(),
-  billingAddress: z.record(z.any()).optional(),
-  shippingAddress: z.record(z.any()).optional(),
+  metadata: z.record(z.any()).optional(),
 })
 
-export async function GET(request: NextRequest) {
-  return withOrganizationAuth(request, async (_req: NextRequest, context: OrganizationContext) => {
-    try {
-      // Get query parameters
-      const searchParams = request.nextUrl.searchParams
-      const status = searchParams.get('status')
-      const limit = parseInt(searchParams.get('limit') || '20')
-      const offset = parseInt(searchParams.get('offset') || '0')
+/**
+ * GET /api/v1/invoices - List invoices
+ */
+export const GET = withMerchantDI(async (context) => {
+  // Parse query parameters
+  const { searchParams } = new URL(context.request.url)
+  const status = searchParams.get('status')
+  const tabId = searchParams.get('tab_id')
+  const billingGroupId = searchParams.get('billing_group_id')
+  const page = parseInt(searchParams.get('page') || '1')
+  const pageSize = Math.min(parseInt(searchParams.get('limit') || '20'), 100)
 
-      // Build query
-      let query = db.select().from(invoices)
-        .where(eq(invoices.organizationId, context.organizationId))
-        .orderBy(desc(invoices.createdAt))
-        .limit(limit)
-        .offset(offset)
+  // Build filters
+  const filters: any = {}
+  if (status) filters.status = status as any
+  if (tabId) filters.tabId = tabId
+  if (billingGroupId) filters.billingGroupId = billingGroupId
 
-      const invoiceList = await query
-
-      return ApiResponseBuilder.success({
-        invoices: invoiceList,
-        limit,
-        offset,
-      })
-    } catch (error) {
-      logger.error('Error fetching invoices', { error, organizationId: context.organizationId })
-      return ApiResponseBuilder.error('Failed to fetch invoices', 500)
-    }
+  // Get invoices using service
+  const result = await context.invoiceService.listInvoices(context.organizationId, filters, {
+    page,
+    pageSize,
   })
-}
 
-export async function POST(request: NextRequest) {
-  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
-    try {
-      const body = await req.json()
-      const validatedData = createInvoiceSchema.parse(body)
+  return new ApiResponseBuilder()
+    .setData(result.data)
+    .setPagination(
+      result.pagination.page,
+      result.pagination.pageSize,
+      result.pagination.totalItems
+    )
+    .setCache(CacheConfigs.shortPrivate)
+    .build()
+})
 
-      let invoice
+/**
+ * POST /api/v1/invoices - Create invoice
+ */
+export const POST = withMerchantDI(async (context) => {
+  // Parse request body
+  const body = await parseJsonBody(context.request)
+  if (!body) {
+    throw new ValidationError('Request body is required')
+  }
 
-      if (validatedData.tabId) {
-        // Create invoice from tab (with optional billing group filtering)
-        invoice = await InvoiceService.createInvoiceFromTab({
-          tabId: validatedData.tabId,
-          organizationId: context.organizationId,
-          lineItemIds: validatedData.lineItemIds,
-          billingGroupId: validatedData.billingGroupId, // Pass billing group filter
-          dueDate: validatedData.dueDate,
-          paymentTerms: validatedData.paymentTerms,
-          notes: validatedData.notes,
-          billingAddress: validatedData.billingAddress,
-          shippingAddress: validatedData.shippingAddress,
-        })
-      } else if (validatedData.customerEmail && validatedData.lineItems) {
-        // Create manual invoice
-        invoice = await InvoiceService.createManualInvoice({
-          organizationId: context.organizationId,
-          customerEmail: validatedData.customerEmail,
-          customerName: validatedData.customerName,
-          lineItems: validatedData.lineItems,
-          dueDate: validatedData.dueDate,
-          paymentTerms: validatedData.paymentTerms,
-          notes: validatedData.notes,
-          billingAddress: validatedData.billingAddress,
-          shippingAddress: validatedData.shippingAddress,
-        })
-      } else {
-        return ApiResponseBuilder.error('Either tabId or customerEmail with lineItems required', 400)
-      }
+  // Validate input
+  const validation = validateInput(body, createInvoiceSchema)
+  if (!validation.success) {
+    return new ApiResponseBuilder()
+      .setStatus(400)
+      .setError('Invalid request data', validation.errors)
+      .build()
+  }
 
-      return ApiResponseBuilder.success(invoice, 201)
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return ApiResponseBuilder.validationError(error.errors)
-      }
+  // Create invoice using service
+  const invoice = await context.invoiceService.createInvoice(
+    context.organizationId,
+    validation.data
+  )
 
-      logger.error('Error creating invoice', { error, organizationId: context.organizationId })
-      return ApiResponseBuilder.error('Failed to create invoice', 500)
-    }
-  })
+  return new ApiResponseBuilder()
+    .setStatus(201)
+    .setData(invoice)
+    .build()
+})
+
+/**
+ * OPTIONS - Handle CORS
+ */
+export async function OPTIONS(_request: NextRequest) {
+  return new ApiResponseBuilder()
+    .setStatus(204)
+    .build()
 }

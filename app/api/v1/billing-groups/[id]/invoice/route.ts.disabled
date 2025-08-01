@@ -1,0 +1,92 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { withMerchantDI } from '@/lib/api/di-middleware'
+import { z } from 'zod'
+import { ApiResponseBuilder } from '@/lib/api/response'
+
+// Validation schema for creating invoice from billing group
+const createInvoiceSchema = z.object({
+  due_date: z.string().datetime(),
+  payment_terms: z.string().optional(),
+  notes: z.string().optional(),
+  include_unassigned_items: z.boolean().optional().default(false),
+  send_email: z.boolean().optional().default(false),
+  billing_address: z.object({
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    state: z.string().optional(),
+    postal_code: z.string().optional(),
+    country: z.string(),
+  }).optional(),
+  shipping_address: z.object({
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    state: z.string().optional(),
+    postal_code: z.string().optional(),
+    country: z.string(),
+  }).optional(),
+})
+
+// POST /api/v1/billing-groups/:id/invoice - Create invoice from billing group
+export const POST = withMerchantDI(async (context) => {
+  const url = new URL(context.request.url)
+  const pathSegments = url.pathname.split('/')
+  const id = pathSegments[pathSegments.indexOf('billing-groups') + 1]
+  
+  try {
+    const body = await context.request.json()
+    const validatedData = createInvoiceSchema.parse(body)
+    
+    // Verify billing group exists and belongs to merchant
+    const billingGroup = await context.billingGroupService.getBillingGroup(id, context.organizationId)
+    if (!billingGroup) {
+      return new ApiResponseBuilder()
+        .setStatus(404)
+        .setError('Billing group not found')
+        .build()
+    }
+    
+    // Create invoice for billing group - using the invoice service
+    const invoice = await context.invoiceService.createBillingGroupInvoice(
+      context.organizationId,
+      {
+        billingGroupId: id,
+        dueDate: new Date(validatedData.due_date),
+        paymentTerms: validatedData.payment_terms,
+        notes: validatedData.notes,
+        billingAddress: validatedData.billing_address,
+        shippingAddress: validatedData.shipping_address,
+        includeUnassignedItems: validatedData.include_unassigned_items,
+      }
+    )
+    
+    // Send invoice email if requested
+    if (validatedData.send_email) {
+      try {
+        await context.invoiceService.sendInvoice(invoice.id, context.organizationId)
+      } catch (error) {
+        // Don't fail the request if email fails
+        console.error('Failed to send invoice email:', error)
+      }
+    }
+    
+    return new ApiResponseBuilder()
+      .setData(invoice)
+      .setMeta({ message: 'Invoice created successfully' })
+      .build()
+      
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return new ApiResponseBuilder()
+        .setStatus(400)
+        .setError('Validation error', error.flatten().fieldErrors)
+        .build()
+    }
+    
+    return new ApiResponseBuilder()
+      .setStatus(500)
+      .setError('Failed to create invoice')
+      .build()
+  }
+})

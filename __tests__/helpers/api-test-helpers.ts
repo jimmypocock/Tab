@@ -1,200 +1,276 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { headers } from 'next/headers'
-import crypto from 'crypto'
+import { NextRequest } from 'next/server'
 
-interface CreateRequestOptions {
-  method?: string
-  headers?: Record<string, string>
-  body?: any
-  searchParams?: Record<string, string>
+export interface MockOrganizationContext {
+  organizationId: string
+  organization: {
+    id: string
+    name: string
+    isMerchant: boolean
+    merchantId?: string | null
+    stripeAccountId?: string | null
+  }
+  user: {
+    id: string
+    email: string
+    name?: string
+  }
+  role: 'owner' | 'admin' | 'member' | 'viewer'
+  apiKey?: {
+    id: string
+    scope: string
+    environment: 'test' | 'live'
+  }
 }
 
-export function createTestRequest(
+export const DEFAULT_MOCK_CONTEXT: MockOrganizationContext = {
+  organizationId: 'org_123',
+  organization: {
+    id: 'org_123',
+    name: 'Test Organization',
+    isMerchant: true,
+    merchantId: 'merchant_123',
+    stripeAccountId: 'acct_test123'
+  },
+  user: {
+    id: 'user_123',
+    email: 'test@example.com',
+    name: 'Test User'
+  },
+  role: 'owner',
+  apiKey: {
+    id: 'key_123',
+    scope: 'full',
+    environment: 'test'
+  }
+}
+
+export function createMockRequest(
+  method: string,
   url: string,
-  options: CreateRequestOptions = {}
+  options: {
+    body?: any
+    headers?: Record<string, string>
+    params?: Record<string, string>
+    searchParams?: Record<string, string>
+  } = {}
 ): NextRequest {
-  const { method = 'GET', headers = {}, body, searchParams } = options
+  const { body, headers = {}, searchParams = {} } = options
   
   // Build URL with search params
-  const fullUrl = new URL(url, 'http://localhost:3000')
-  if (searchParams) {
-    Object.entries(searchParams).forEach(([key, value]) => {
-      fullUrl.searchParams.set(key, value)
-    })
+  const urlObj = new URL(url, 'http://localhost:3000')
+  Object.entries(searchParams).forEach(([key, value]) => {
+    urlObj.searchParams.set(key, value)
+  })
+  
+  // Default headers
+  const defaultHeaders = {
+    'content-type': 'application/json',
+    'x-api-key': 'tab_test_12345678901234567890123456789012',
+    ...headers
   }
   
-  // Create request options
-  const requestInit: RequestInit = {
+  const request = new NextRequest(urlObj.toString(), {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
-  }
+    headers: defaultHeaders,
+    body: body ? JSON.stringify(body) : undefined
+  })
   
-  // Add body if provided
-  if (body && method !== 'GET' && method !== 'HEAD') {
-    requestInit.body = JSON.stringify(body)
-  }
-  
-  return new NextRequest(fullUrl.toString(), requestInit)
+  return request
 }
 
 export function createAuthenticatedRequest(
   method: string,
   url: string,
-  body: any,
-  apiKey: string
+  options: Parameters<typeof createMockRequest>[2] = {}
 ): NextRequest {
-  return createTestRequest(url, {
-    method,
-    body,
+  return createMockRequest(method, url, {
+    ...options,
     headers: {
-      'X-API-Key': apiKey,
-    },
+      'x-api-key': 'tab_test_12345678901234567890123456789012',
+      ...options.headers
+    }
   })
 }
 
-// Helper to extract response data
-export async function getResponseData<T = any>(response: NextResponse): Promise<T> {
-  // Handle both real NextResponse and mock response objects
-  if (!response) {
-    throw new Error('Response is undefined')
+export async function parseResponse(response: Response) {
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
   }
-  
-  // For mock responses that don't have clone method
-  if (typeof response.json === 'function') {
-    try {
-      return await response.json()
-    } catch (error) {
-      // If json() fails, try text()
-      if (typeof response.text === 'function') {
-        const text = await response.text()
-        return JSON.parse(text)
-      }
-    }
-  }
-  
-  // For real NextResponse objects
-  if (typeof response.clone === 'function') {
-    const clonedResponse = response.clone()
-    const text = await clonedResponse.text()
-    try {
-      return JSON.parse(text)
-    } catch {
-      throw new Error(`Invalid JSON response: ${text}`)
-    }
-  }
-  
-  throw new Error('Invalid response object')
 }
 
-// Mock implementations for testing
-export const mockImplementations = {
-  // Mock successful API key validation
-  validApiKey: (merchantId: string) => {
-    const apiKey = `tab_test_${crypto.randomBytes(16).toString('hex')}`
-    const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
-    
-    return {
-      key: apiKey,
-      mockData: {
-        id: crypto.randomUUID(),
-        merchantId,
-        keyHash,
-        keyPrefix: apiKey.substring(0, 8),
-        isActive: true,
-        environment: 'test',
-        merchant: {
-          id: merchantId,
-          businessName: 'Test Business',
-          userId: crypto.randomUUID(),
-        }
-      }
+export function expectSuccessResponse(response: Response, statusCode = 200) {
+  expect(response.status).toBe(statusCode)
+  expect(response.headers.get('content-type')).toContain('application/json')
+}
+
+export function expectErrorResponse(response: Response, statusCode: number, errorMessage?: string) {
+  expect(response.status).toBe(statusCode)
+  if (errorMessage) {
+    return expect(parseResponse(response)).resolves.toMatchObject({
+      error: expect.stringContaining(errorMessage)
+    })
+  }
+}
+
+export function expectPaginatedResponse(data: any) {
+  expect(data).toMatchObject({
+    data: expect.any(Array),
+    pagination: {
+      page: expect.any(Number),
+      pageSize: expect.any(Number),
+      totalPages: expect.any(Number),
+      totalItems: expect.any(Number)
     }
-  },
+  })
+}
+
+export function expectValidationError(response: Response, field?: string) {
+  expect(response.status).toBe(400)
+  return expect(parseResponse(response)).resolves.toMatchObject({
+    error: expect.stringContaining(field || 'validation')
+  })
+}
+
+export function mockSupabaseAuth(userId = 'user_123', orgId = 'org_123') {
+  const mockSupabase = {
+    auth: {
+      getUser: jest.fn().mockResolvedValue({
+        data: {
+          user: {
+            id: userId,
+            email: 'test@example.com'
+          }
+        },
+        error: null
+      })
+    },
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          single: jest.fn().mockResolvedValue({
+            data: {
+              id: orgId,
+              name: 'Test Organization'
+            },
+            error: null
+          })
+        }))
+      }))
+    }))
+  }
   
-  // Mock database queries
-  mockDbQueries: () => ({
-    'apiKeys.findFirst': jest.fn(),
-    'tabs.findFirst': jest.fn(),
-    'tabs.findMany': jest.fn(),
-    'merchants.findFirst': jest.fn(),
+  return mockSupabase
+}
+
+// Common test data factories
+export const TestDataFactory = {
+  tab: (overrides = {}) => ({
+    id: 'tab_123',
+    organizationId: 'org_123',
+    status: 'open',
+    currency: 'USD',
+    totalAmount: '100.00',
+    subtotal: '90.91',
+    taxAmount: '9.09',
+    paidAmount: '0.00',
+    customerName: 'John Doe',
+    customerEmail: 'john@example.com',
+    customerOrganizationId: null,
+    externalReference: null,
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
   }),
   
-  // Mock transaction
-  mockTransaction: (implementation: (tx: any) => Promise<any>) => {
-    return jest.fn().mockImplementation(async (fn: any) => {
-      const tx = {
-        insert: jest.fn().mockReturnThis(),
-        update: jest.fn().mockReturnThis(),
-        delete: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        from: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        values: jest.fn().mockReturnThis(),
-        set: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockReturnThis(),
-        query: {
-          tabs: {
-            findFirst: jest.fn(),
-            findMany: jest.fn(),
-          },
-          lineItems: {
-            findMany: jest.fn(),
-          },
-        },
-      }
-      
-      if (implementation) {
-        return implementation(tx)
-      }
-      
-      return fn(tx)
-    })
-  },
-}
-
-// Test assertions
-export const apiAssertions = {
-  expectSuccessResponse: (response: NextResponse, expectedStatus = 200) => {
-    expect(response.status).toBe(expectedStatus)
-    expect(response.headers.get('content-type')).toContain('application/json')
-  },
+  lineItem: (overrides = {}) => ({
+    id: 'item_123',
+    tabId: 'tab_123',
+    organizationId: 'org_123',
+    billingGroupId: null,
+    description: 'Test Item',
+    quantity: '1',
+    unitPrice: '90.91',
+    totalPrice: '90.91',
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  }),
   
-  expectErrorResponse: async (response: NextResponse, expectedStatus: number, expectedError?: string) => {
-    expect(response.status).toBe(expectedStatus)
-    if (expectedError) {
-      const data = await getResponseData(response)
-      if (typeof data.error === 'string') {
-        expect(data.error.toLowerCase()).toContain(expectedError.toLowerCase())
-      } else if (data.error && typeof data.error === 'object') {
-        expect(JSON.stringify(data.error).toLowerCase()).toContain(expectedError.toLowerCase())
-      } else if (data.message) {
-        expect(data.message.toLowerCase()).toContain(expectedError.toLowerCase())
-      }
-    }
-  },
+  billingGroup: (overrides = {}) => ({
+    id: 'group_123',
+    organizationId: 'org_123',
+    name: 'Test Group',
+    description: 'Test billing group',
+    isDefault: false,
+    displayOrder: 0,
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  }),
   
-  expectPaginatedResponse: async (response: NextResponse) => {
-    const data = await getResponseData(response)
-    expect(data).toHaveProperty('data')
-    expect(data).toHaveProperty('meta')
-    expect(data.meta).toHaveProperty('page')
-    expect(data.meta).toHaveProperty('limit')
-    expect(data.meta).toHaveProperty('total')
-    expect(data.meta).toHaveProperty('totalPages')
-  },
+  payment: (overrides = {}) => ({
+    id: 'payment_123',
+    tabId: 'tab_123',
+    organizationId: 'org_123',
+    amount: '50.00',
+    currency: 'USD',
+    status: 'completed',
+    processor: 'stripe',
+    processorPaymentId: 'pi_test123',
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  }),
   
-  expectUnauthorized: async (response: NextResponse) => {
-    expect(response.status).toBe(401)
-    const data = await getResponseData(response)
-    expect(data.error).toBeDefined()
-  },
+  invoice: (overrides = {}) => ({
+    id: 'invoice_123',
+    tabId: 'tab_123',
+    billingGroupId: 'group_123',
+    organizationId: 'org_123',
+    invoiceNumber: 'INV-001',
+    publicUrl: 'inv_test123',
+    status: 'pending',
+    dueDate: new Date('2023-02-01'),
+    totalAmount: '100.00',
+    paidAmount: '0.00',
+    currency: 'USD',
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  }),
   
-  expectNotFound: async (response: NextResponse) => {
-    expect(response.status).toBe(404)
-    const data = await getResponseData(response)
-    expect(data.error).toBeDefined()
-  },
+  organization: (overrides = {}) => ({
+    id: 'org_123',
+    name: 'Test Organization',
+    isMerchant: true,
+    merchantId: 'merchant_123',
+    customerOrganizationCode: 'TESTORG',
+    metadata: null,
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  }),
+  
+  apiKey: (overrides = {}) => ({
+    id: 'key_123',
+    organizationId: 'org_123',
+    name: 'Test Key',
+    keyHash: 'hashed_key',
+    lastUsedAt: null,
+    usageCount: 0,
+    isActive: true,
+    scope: 'full',
+    environment: 'test',
+    createdAt: new Date('2023-01-01'),
+    updatedAt: new Date('2023-01-01'),
+    ...overrides
+  })
 }

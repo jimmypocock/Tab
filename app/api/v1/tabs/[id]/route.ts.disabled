@@ -1,0 +1,81 @@
+/**
+ * Single Tab Routes - Refactored with DI Pattern
+ */
+
+import { NextRequest } from 'next/server'
+import { withMerchantDI } from '@/lib/api/di-middleware'
+import { updateTabSchema, validateInput } from '@/lib/api/validation'
+import { ApiResponseBuilder } from '@/lib/api/response'
+import { CacheConfigs } from '@/lib/api/cache'
+import { ValidationError } from '@/lib/errors'
+import { parseJsonBody } from '@/lib/api/middleware'
+
+interface RouteParams {
+  params: Promise<{ id: string }>
+}
+
+/**
+ * GET /api/v1/tabs/[id] - Get single tab
+ */
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params
+  
+  return withMerchantDI(async (context) => {
+    const tab = await context.tabService.getTab(id, context.organizationId)
+
+    return new ApiResponseBuilder()
+      .setData(tab)
+      .setCache(CacheConfigs.shortPrivate)
+      .build()
+  })(request)
+}
+
+/**
+ * PUT /api/v1/tabs/[id] - Update tab
+ */
+export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params
+  
+  return withMerchantDI(async (context) => {
+    // Parse request body
+    const body = await parseJsonBody(context.request)
+    if (!body) {
+      throw new ValidationError('Request body is required')
+    }
+
+    // Validate input
+    const validation = validateInput(body, updateTabSchema)
+    if (!validation.success) {
+      return new ApiResponseBuilder()
+        .setStatus(400)
+        .setError('Invalid request data', validation.errors)
+        .build()
+    }
+
+    // Update tab using service
+    const tab = await context.tabService.updateTab(
+      id,
+      context.organizationId,
+      validation.data
+    )
+
+    return new ApiResponseBuilder()
+      .setData(tab)
+      .build()
+  })(request)
+}
+
+/**
+ * DELETE /api/v1/tabs/[id] - Delete/void tab
+ */
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params
+  
+  return withMerchantDI(async (context) => {
+    await context.tabService.deleteTab(id, context.organizationId)
+
+    return new ApiResponseBuilder()
+      .setStatus(204)
+      .build()
+  })(request)
+}

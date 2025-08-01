@@ -14,6 +14,7 @@ export enum ErrorCode {
   EXTERNAL_SERVICE_ERROR = 'EXTERNAL_SERVICE_ERROR',
   
   // Business logic errors
+  BUSINESS_RULE_VIOLATION = 'BUSINESS_RULE_VIOLATION',
   INSUFFICIENT_FUNDS = 'INSUFFICIENT_FUNDS',
   TAB_ALREADY_PAID = 'TAB_ALREADY_PAID',
   TAB_VOID = 'TAB_VOID',
@@ -119,6 +120,13 @@ export class PaymentError extends AppError {
   constructor(message: string, details?: any) {
     super(ErrorCode.PAYMENT_FAILED, message, 400, details)
     this.name = 'PaymentError'
+  }
+}
+
+export class BusinessRuleError extends AppError {
+  constructor(message: string, details?: any) {
+    super(ErrorCode.BUSINESS_RULE_VIOLATION, message, 422, details)
+    this.name = 'BusinessRuleError'
   }
 }
 

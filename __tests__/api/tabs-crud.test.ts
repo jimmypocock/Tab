@@ -39,41 +39,43 @@ jest.mock('@/lib/api/organization-middleware', () => ({
   })
 }))
 
-// Mock database client
-jest.mock('@/lib/db/client', () => ({
-  db: {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    and: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    offset: jest.fn().mockReturnThis(),
-    innerJoin: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    values: jest.fn().mockReturnThis(),
-    returning: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    delete: jest.fn().mockReturnThis(),
-    transaction: jest.fn(),
-    query: {
-      tabs: {
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-      },
-      merchants: {
-        findFirst: jest.fn(),
-      },
-      lineItems: {
-        findMany: jest.fn(),
-      },
-      organizations: {
-        findFirst: jest.fn()
-      }
+// Mock database client with proper structure
+const mockDb = {
+  select: jest.fn(),
+  from: jest.fn(),
+  where: jest.fn(),
+  eq: jest.fn(),
+  and: jest.fn(),
+  orderBy: jest.fn(),
+  limit: jest.fn(),
+  offset: jest.fn(),
+  innerJoin: jest.fn(),
+  insert: jest.fn(),
+  values: jest.fn(),
+  returning: jest.fn(),
+  update: jest.fn(),
+  set: jest.fn(),
+  delete: jest.fn(),
+  transaction: jest.fn(),
+  query: {
+    tabs: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    merchants: {
+      findFirst: jest.fn(),
+    },
+    lineItems: {
+      findMany: jest.fn(),
+    },
+    organizations: {
+      findFirst: jest.fn()
     }
   }
+}
+
+jest.mock('@/lib/db/client', () => ({
+  db: mockDb
 }))
 
 // Mock other dependencies
@@ -120,8 +122,7 @@ jest.mock('@/lib/supabase/client', () => ({
   }))
 }))
 
-import { db } from '@/lib/db/client'
-const mockDb = db as jest.Mocked<typeof db>
+// Remove these lines since we're using the mockDb defined above
 
 describe('/api/v1/tabs', () => {
   const mockMerchant = {
@@ -148,6 +149,54 @@ describe('/api/v1/tabs', () => {
     updatedAt: new Date('2023-01-01')
   }
 
+  // Setup mock chaining
+  beforeEach(() => {
+    // Reset all mocks
+    jest.clearAllMocks()
+    
+    // Setup query builder chain
+    const mockChain = {
+      where: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      and: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      execute: jest.fn(),
+      returning: jest.fn()
+    }
+    
+    // Configure select chain
+    mockDb.select.mockReturnValue({
+      from: jest.fn().mockReturnValue(mockChain)
+    })
+    
+    // Configure other operations
+    mockDb.insert.mockReturnValue({
+      values: jest.fn().mockReturnValue({
+        returning: jest.fn()
+      })
+    })
+    
+    mockDb.update.mockReturnValue({
+      set: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnValue({
+          returning: jest.fn()
+        })
+      })
+    })
+    
+    mockDb.delete.mockReturnValue({
+      where: jest.fn().mockReturnValue({
+        returning: jest.fn()
+      })
+    })
+    
+    // Configure transaction
+    mockDb.transaction.mockImplementation((callback) => callback(mockDb))
+  })
+
   const mockLineItems = [
     {
       id: 'item_1',
@@ -162,19 +211,16 @@ describe('/api/v1/tabs', () => {
     }
   ]
 
-  beforeEach(() => {
-    jest.clearAllMocks()
-  })
-
   describe('GET - List Tabs', () => {
     it('should return merchant tabs successfully', async () => {
-      // Mock database query response
+      // Mock database query response - use the relational API
       mockDb.query.tabs.findMany.mockResolvedValue([{
         ...mockTab,
         lineItems: [],
         payments: [],
         customerOrganization: null
       }])
+      ;(countRows as jest.Mock).mockResolvedValue(1)
 
       const request = new NextRequest('http://localhost/api/v1/tabs', {
         method: 'GET',
@@ -187,7 +233,8 @@ describe('/api/v1/tabs', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data).toHaveProperty('data')
+      expect(data).toHaveProperty('pagination')
       expect(Array.isArray(data.data)).toBe(true)
       expect(data.data.length).toBe(1)
       expect(data.data[0]).toMatchObject({

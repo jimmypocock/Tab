@@ -1,283 +1,99 @@
+/**
+ * Tab Routes - Refactored with DI Pattern
+ */
+
 import { NextRequest } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tabs, lineItems } from '@/lib/db/schema'
-import { withOrganizationAuth, OrganizationContext } from '@/lib/api/organization-middleware'
-import { parseJsonBody } from '@/lib/api/middleware'
+import { withMerchantDI } from '@/lib/api/di-middleware'
 import { createTabSchema, tabQuerySchema, validateInput } from '@/lib/api/validation'
-import { 
-  createSuccessResponse,
-  ApiResponseBuilder 
-} from '@/lib/api/response'
+import { ApiResponseBuilder } from '@/lib/api/response'
 import { CacheConfigs } from '@/lib/api/cache'
-import { 
-  ValidationError, 
-  DatabaseError
-} from '@/lib/errors'
-import { logger } from '@/lib/logger'
-import { CustomerTargetingService } from '@/lib/services/customer-targeting.service'
-import { 
-  TAX_RATE, 
-  calculateTabBalance,
-  getTabStatus,
-  PAGINATION_MAX_LIMIT 
-} from '@/lib/utils/index'
-import { eq, and, gte, lte, like } from 'drizzle-orm'
-import { countRows } from '@/lib/db/queries'
-import { 
-  parseFieldSelection, 
-  applyFieldSelection,
-  DefaultFields,
-  validateFieldSelection 
-} from '@/lib/api/field-selection'
+import { ValidationError } from '@/lib/errors'
+import { parseJsonBody } from '@/lib/api/middleware'
+import type { TabFilters } from '@/lib/repositories/tab.repository'
 
-export async function POST(request: NextRequest) {
-  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
-    // Parse request body
-    const body = await parseJsonBody(req)
-    
-    // Validate input
-    const validation = validateInput(createTabSchema, body)
-    if (!validation.success) {
-      throw new ValidationError('Invalid request data', validation.error.issues)
-    }
+/**
+ * GET /api/v1/tabs - List tabs
+ */
+export const GET = withMerchantDI(async (context) => {
+  // Parse query parameters
+  const { searchParams } = new URL(context.request.url)
+  const queryParams = Object.fromEntries(searchParams.entries())
+  
+  const validation = validateInput(tabQuerySchema, queryParams)
+  if (!validation.success) {
+    return new ApiResponseBuilder()
+      .setStatus(400)
+      .setError('Invalid query parameters', validation.errors)
+      .build()
+  }
 
-    const data = validation.data
-    const taxRate = data.taxRate ?? TAX_RATE
+  const query = validation.data
+  
+  // Build filters
+  const filters: TabFilters = {}
+  if (query.status) filters.status = query.status
+  if (query.customerEmail) filters.customerEmail = query.customerEmail
+  if (query.customerOrganizationId) filters.customerOrganizationId = query.customerOrganizationId
+  if (query.externalReference) filters.externalReference = query.externalReference
+  if (query.createdAfter) filters.createdAfter = new Date(query.createdAfter)
+  if (query.createdBefore) filters.createdBefore = new Date(query.createdBefore)
 
-    try {
-      // Calculate totals
-      let subtotal = 0
-      const lineItemsData = data.lineItems.map(item => {
-        const total = (item.quantity || 1) * (item.unitPrice || 0)
-        subtotal += total
-        return {
-          ...item,
-          total: total.toFixed(2),
-          unitPrice: (item.unitPrice || 0).toFixed(2),
-          metadata: item.metadata || null,
-        }
-      })
-
-      // Calculate tax and total
-      const taxAmount = subtotal * taxRate
-      const totalAmount = subtotal + taxAmount
-
-      // Create tab with line items in a transaction
-      const result = await db.transaction(async (tx) => {
-        // Validate customer targeting before creating tab
-        const customerValidation = CustomerTargetingService.validateCustomerTargeting({
-          customerEmail: data.customerEmail,
-          customerName: data.customerName,
-          customerOrganizationId: data.customerOrganizationId,
-        })
-        
-        if (!customerValidation.isValid) {
-          throw new ValidationError(customerValidation.error!)
-        }
-        
-        // Create the tab
-        const [newTab] = await tx.insert(tabs).values({
-          organizationId: context.organizationId,
-          customerEmail: data.customerEmail || null,
-          customerName: data.customerName || null,
-          customerOrganizationId: data.customerOrganizationId || null,
-          externalReference: data.externalReference || null,
-          currency: data.currency,
-          subtotal: subtotal.toFixed(2),
-          taxAmount: taxAmount.toFixed(2),
-          totalAmount: totalAmount.toFixed(2),
-          metadata: data.metadata || null,
-        }).returning()
-
-        if (!newTab) {
-          throw new DatabaseError('Failed to create tab')
-        }
-
-        // Create line items
-        if (lineItemsData.length > 0) {
-          await tx.insert(lineItems).values(
-            lineItemsData.map(item => ({
-              tabId: newTab.id,
-              description: item.description,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              total: item.total,
-              metadata: item.metadata,
-            }))
-          )
-        }
-
-        // Fetch the complete tab with line items and customer organization info
-        const completeTab = await tx.query.tabs.findFirst({
-          where: (tabs, { eq }) => eq(tabs.id, newTab.id),
-          with: {
-            lineItems: {
-              orderBy: (lineItems, { asc }) => [asc(lineItems.createdAt)],
-            },
-            customerOrganization: {
-              columns: {
-                id: true,
-                name: true,
-                billingEmail: true,
-              }
-            },
-          },
-        })
-
-        return completeTab
-      })
-
-      logger.info('Tab created', {
-        tabId: result?.id,
-        organizationId: context.organizationId,
-        totalAmount: totalAmount.toFixed(2),
-      })
-
-      return new ApiResponseBuilder()
-        .setData({
-          tab: result,
-          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/pay/${result?.id}`,
-        })
-        .setStatusCode(201)
-        .build()
-        
-    } catch (error) {
-      logger.error('Failed to create tab', error as Error, {
-        organizationId: context.organizationId,
-      })
-      throw new DatabaseError('Failed to create tab', error)
-    }
-  }, {
-    requiredScope: 'merchant'
+  // Get tabs using service
+  const result = await context.tabService.listTabs(context.organizationId, {
+    page: query.page,
+    pageSize: query.limit,
+    sortBy: query.sortBy as any,
+    sortOrder: query.sortOrder as any,
+    filters,
   })
-}
 
-export async function GET(request: NextRequest) {
-  return withOrganizationAuth(request, async (req: NextRequest, context: OrganizationContext) => {
-    // Parse query parameters
-    const { searchParams } = new URL(req.url)
-    const queryParams = Object.fromEntries(searchParams.entries())
-    
-    // Parse field selection
-    const requestedFields = parseFieldSelection(searchParams.get('fields'))
-    const selectedFields = requestedFields || DefaultFields.tab
-    
-    // Validate field selection if provided
-    if (requestedFields) {
-      const validation = validateFieldSelection(requestedFields, DefaultFields.tabWithItems)
-      if (!validation.valid) {
-        throw new ValidationError(
-          `Invalid fields: ${validation.invalidFields?.join(', ')}`,
-          [{ message: 'Invalid field selection', path: ['fields'] }]
-        )
-      }
-    }
-    
-    // Validate query parameters
-    const validation = validateInput(tabQuerySchema, queryParams)
-    if (!validation.success) {
-      throw new ValidationError('Invalid query parameters', validation.error.issues)
-    }
+  return new ApiResponseBuilder()
+    .setData(result.data)
+    .setPagination(
+      result.pagination.page,
+      result.pagination.pageSize,
+      result.pagination.totalItems
+    )
+    .setCache(CacheConfigs.shortPrivate)
+    .build()
+})
 
-    const query = validation.data
-    const limit = Math.min(query.limit || 10, PAGINATION_MAX_LIMIT)
-    const offset = ((query.page || 1) - 1) * limit
+/**
+ * POST /api/v1/tabs - Create tab
+ */
+export const POST = withMerchantDI(async (context) => {
+  // Parse request body
+  const body = await parseJsonBody(context.request)
+  if (!body) {
+    throw new ValidationError('Request body is required')
+  }
 
-    try {
-      // Build where conditions
-      const conditions = [eq(tabs.organizationId, context.organizationId)]
-      
-      if (query.status) {
-        conditions.push(eq(tabs.status, query.status))
-      }
-      
-      if (query.customerEmail) {
-        conditions.push(eq(tabs.customerEmail, query.customerEmail))
-      }
-      
-      if (query.customerOrganizationId) {
-        conditions.push(eq(tabs.customerOrganizationId, query.customerOrganizationId))
-      }
-      
-      if (query.externalReference) {
-        conditions.push(like(tabs.externalReference, `%${query.externalReference}%`))
-      }
-      
-      if (query.createdAfter) {
-        conditions.push(gte(tabs.createdAt, new Date(query.createdAfter)))
-      }
-      
-      if (query.createdBefore) {
-        conditions.push(lte(tabs.createdAt, new Date(query.createdBefore)))
-      }
+  // Validate input
+  const validation = validateInput(createTabSchema, body)
+  if (!validation.success) {
+    return new ApiResponseBuilder()
+      .setStatus(400)
+      .setError('Invalid request data', validation.errors)
+      .build()
+  }
 
-      // Execute queries in parallel
-      const [results, totalCount] = await Promise.all([
-        db.query.tabs.findMany({
-          where: conditions.length > 0 ? and(...conditions) : undefined,
-          with: {
-            lineItems: {
-              orderBy: (lineItems, { asc }) => [asc(lineItems.createdAt)],
-            },
-            payments: {
-              where: (payments, { eq }) => eq(payments.status, 'succeeded'),
-              orderBy: (payments, { desc }) => [desc(payments.createdAt)],
-            },
-            customerOrganization: {
-              columns: {
-                id: true,
-                name: true,
-                billingEmail: true,
-              }
-            },
-          },
-          limit,
-          offset,
-          orderBy: query.sortBy === 'amount' 
-            ? query.sortOrder === 'asc' 
-              ? (tabs, { asc }) => [asc(tabs.totalAmount)]
-              : (tabs, { desc }) => [desc(tabs.totalAmount)]
-            : query.sortOrder === 'asc'
-              ? (tabs, { asc }) => [asc(tabs.createdAt)]
-              : (tabs, { desc }) => [desc(tabs.createdAt)],
-        }),
-        countRows(tabs, conditions.length > 0 ? and(...conditions) : undefined),
-      ])
+  // Create tab using service
+  const tab = await context.tabService.createTab(
+    context.organizationId,
+    validation.data
+  )
 
-      // Add computed fields
-      const enrichedResults = results.map(tab => ({
-        ...tab,
-        balance: calculateTabBalance(tab.totalAmount, tab.paidAmount),
-        computedStatus: getTabStatus(tab.totalAmount, tab.paidAmount, tab.status),
-      }))
+  return new ApiResponseBuilder()
+    .setStatus(201)
+    .setData(tab)
+    .build()
+})
 
-      // Apply field selection
-      const projectedResults = applyFieldSelection(enrichedResults, selectedFields)
-
-      logger.debug('Tabs fetched', {
-        count: results.length,
-        organizationId: context.organizationId,
-        fieldsRequested: requestedFields ? Array.from(requestedFields) : 'default',
-      })
-
-      return new ApiResponseBuilder()
-        .setData(projectedResults)
-        .setPagination(query.page || 1, limit, totalCount)
-        .setCache(CacheConfigs.shortPrivate)
-        .build()
-        
-    } catch (error) {
-      logger.error('Failed to fetch tabs', error as Error, {
-        organizationId: context.organizationId,
-      })
-      throw new DatabaseError('Failed to fetch tabs', error)
-    }
-  }, {
-    requiredScope: 'merchant'
-  })
-}
-
-// Handle OPTIONS for CORS
+/**
+ * OPTIONS - Handle CORS
+ */
 export async function OPTIONS(_request: NextRequest) {
-  return createSuccessResponse({}, undefined, 204)
+  return new ApiResponseBuilder()
+    .setStatus(204)
+    .build()
 }

@@ -1,4 +1,4 @@
-import { InvoiceService } from '@/lib/services/invoice.service'
+import { getServerDI } from '@/lib/di/server'
 import InvoicePaymentClient from './invoice-payment-client'
 import { notFound } from 'next/navigation'
 
@@ -8,14 +8,9 @@ interface PageProps {
 
 export default async function InvoicePaymentPage({ params }: PageProps) {
   try {
-    // Fetch the invoice data
-    const invoiceData = await InvoiceService.getInvoiceByPublicUrl(params.id)
-    
-    if (!invoiceData) {
-      notFound()
-    }
-
-    const { invoice, lineItems, organization } = invoiceData
+    // Fetch the invoice data using DI
+    const di = getServerDI()
+    const invoice = await di.invoiceService.getInvoiceByPublicUrl(params.id)
 
     // Check if invoice is payable
     if (invoice.status === 'paid' || invoice.status === 'void' || invoice.status === 'uncollectible') {

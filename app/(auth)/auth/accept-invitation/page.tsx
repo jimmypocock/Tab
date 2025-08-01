@@ -314,7 +314,7 @@ export default function AcceptInvitationPage() {
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
           <h2 className="text-2xl font-bold text-gray-900">Invitation Accepted!</h2>
           <p className="text-gray-600">
-            You've successfully joined {organizationName || 'the organization'}.
+            You&apos;ve successfully joined {organizationName || 'the organization'}.
             Redirecting to dashboard...
           </p>
         </div>

@@ -107,7 +107,7 @@ export default function ConfirmEmailPage() {
 
           <div className="mt-6 text-center">
             <p className="text-xs text-gray-500">
-              Didn't receive the email? Check your spam folder or
+              Didn&apos;t receive the email? Check your spam folder or
               <a href="/register" className="ml-1 font-medium text-indigo-600 hover:text-indigo-500">
                 try again
               </a>

@@ -6,7 +6,7 @@ import { createPaymentIntent } from '@/lib/stripe/client'
 import { z } from 'zod'
 import { generateId } from '@/lib/utils/index'
 import { ApiError } from '@/lib/api/errors'
-import { InvoiceService } from '@/lib/services/invoice.service'
+import { getServerDI } from '@/lib/di/server'
 
 const invoicePaymentSchema = z.object({
   invoiceId: z.string().uuid(),
@@ -31,17 +31,24 @@ export async function POST(request: NextRequest) {
 
     const data = validation.data
 
-    // Get invoice by public URL
-    const invoiceData = await InvoiceService.getInvoiceByPublicUrl(data.publicUrl)
-    
-    if (!invoiceData || invoiceData.invoice.id !== data.invoiceId) {
+    // Get invoice by public URL using DI
+    const di = getServerDI()
+    let invoice
+    try {
+      invoice = await di.invoiceService.getInvoiceByPublicUrl(data.publicUrl)
+    } catch (error) {
       return NextResponse.json(
         { error: { message: 'Invoice not found' } },
         { status: 404 }
       )
     }
-
-    const { invoice, organization } = invoiceData
+    
+    if (invoice.id !== data.invoiceId) {
+      return NextResponse.json(
+        { error: { message: 'Invoice not found' } },
+        { status: 404 }
+      )
+    }
 
     // Check if invoice is payable
     if (invoice.status === 'paid' || invoice.status === 'void' || invoice.status === 'uncollectible') {
@@ -68,7 +75,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
-        organizationId: organization.id,
+        organizationId: invoice.organizationId,
         customerEmail: data.customerEmail,
         customerName: data.customerName,
         paymentType: 'invoice',
@@ -80,7 +87,7 @@ export async function POST(request: NextRequest) {
     // Create payment record
     await db.insert(payments).values({
       id: generateId('pay'),
-      organizationId: organization.id,
+      organizationId: invoice.organizationId,
       invoiceId: invoice.id,
       amount: data.amount.toString(),
       currency: data.currency,

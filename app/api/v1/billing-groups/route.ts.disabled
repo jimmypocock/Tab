@@ -1,0 +1,102 @@
+/**
+ * Billing Group Routes - Refactored with DI Pattern
+ */
+
+import { NextRequest } from 'next/server'
+import { withMerchantDI } from '@/lib/api/di-middleware'
+import { validateInput } from '@/lib/api/validation'
+import { ApiResponseBuilder } from '@/lib/api/response'
+import { CacheConfigs } from '@/lib/api/cache'
+import { ValidationError } from '@/lib/errors'
+import { parseJsonBody } from '@/lib/api/middleware'
+import { z } from 'zod'
+
+const createBillingGroupSchema = z.object({
+  tabId: z.string().uuid(),
+  name: z.string().min(1).max(255),
+  groupType: z.enum(['company', 'personal', 'department', 'insurance', 'grant', 'master', 'guest', 'group', 'project', 'split']),
+  payerEmail: z.string().email().optional(),
+  creditLimit: z.number().positive().optional(),
+  depositAmount: z.number().positive().optional(),
+  authorizationCode: z.string().optional(),
+  poNumber: z.string().optional(),
+  metadata: z.record(z.any()).optional(),
+})
+
+/**
+ * GET /api/v1/billing-groups - List billing groups
+ */
+export const GET = withMerchantDI(async (context) => {
+  // Parse query parameters
+  const { searchParams } = new URL(context.request.url)
+  const tabId = searchParams.get('tab_id')
+  const page = parseInt(searchParams.get('page') || '1')
+  const pageSize = Math.min(parseInt(searchParams.get('limit') || '20'), 100)
+
+  if (!tabId) {
+    return new ApiResponseBuilder()
+      .setStatus(400)
+      .setError('tab_id query parameter is required')
+      .build()
+  }
+
+  // Build filters
+  const filters = { tabId }
+
+  // Get billing groups using service
+  const result = await context.billingGroupService.listBillingGroups(context.organizationId, {
+    page,
+    pageSize,
+    filters,
+  })
+
+  return new ApiResponseBuilder()
+    .setData(result.data)
+    .setPagination(
+      result.pagination.page,
+      result.pagination.pageSize,
+      result.pagination.totalItems
+    )
+    .setCache(CacheConfigs.shortPrivate)
+    .build()
+})
+
+/**
+ * POST /api/v1/billing-groups - Create billing group
+ */
+export const POST = withMerchantDI(async (context) => {
+  // Parse request body
+  const body = await parseJsonBody(context.request)
+  if (!body) {
+    throw new ValidationError('Request body is required')
+  }
+
+  // Validate input
+  const validation = validateInput(body, createBillingGroupSchema)
+  if (!validation.success) {
+    return new ApiResponseBuilder()
+      .setStatus(400)
+      .setError('Invalid request data', validation.errors)
+      .build()
+  }
+
+  // Create billing group using service
+  const billingGroup = await context.billingGroupService.createBillingGroup(
+    context.organizationId,
+    validation.data
+  )
+
+  return new ApiResponseBuilder()
+    .setStatus(201)
+    .setData(billingGroup)
+    .build()
+})
+
+/**
+ * OPTIONS - Handle CORS
+ */
+export async function OPTIONS(_request: NextRequest) {
+  return new ApiResponseBuilder()
+    .setStatus(204)
+    .build()
+}

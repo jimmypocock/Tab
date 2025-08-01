@@ -1,0 +1,34 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getGlobalContainer } from '@/lib/di/container'
+import { productionConfig } from '@/lib/di/config'
+import { DITokens } from '@/lib/di/types'
+import { InvoiceManagementService } from '@/lib/services/invoice-management.service'
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { publicUrl: string } }
+) {
+  try {
+    // Set up DI container for public route
+    const container = getGlobalContainer()
+    productionConfig.forEach(config => {
+      container.register(config.token, config.factory, config.singleton)
+    })
+
+    // Get invoice service
+    const invoiceService = container.resolve<InvoiceManagementService>(DITokens.InvoiceService)
+    
+    // Get invoice by public URL
+    const invoice = await invoiceService.getInvoiceByPublicUrl(params.publicUrl)
+    
+    return NextResponse.json({
+      data: invoice
+    })
+  } catch (error) {
+    console.error('Error fetching invoice:', error)
+    return NextResponse.json(
+      { error: { message: 'Failed to fetch invoice' } },
+      { status: 500 }
+    )
+  }
+}
