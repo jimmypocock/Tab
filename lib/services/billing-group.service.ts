@@ -16,7 +16,7 @@ import {
   type InvoiceLineItem,
 } from '@/lib/db/schema'
 import { eq, and, or, desc, asc, sql, gte, lte, ilike } from 'drizzle-orm'
-import { generateId } from '@/lib/utils'
+import { generateId } from '@/lib/utils/index'
 import { logger } from '@/lib/logger'
 
 export interface BillingGroupWithRelations extends BillingGroup {

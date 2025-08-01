@@ -149,23 +149,58 @@ export async function POST(request: NextRequest) {
           .returning()
 
         if (payment) {
-          // Update tab paid amount
-          const tab = await db.query.tabs.findFirst({
-            where: (tabs, { eq }) => eq(tabs.id, payment.tabId),
-          })
+          // Check if this is an invoice payment
+          if (payment.invoiceId) {
+            const { invoices } = await import('@/lib/db/schema')
+            const { eq } = await import('drizzle-orm')
+            
+            // Update invoice paid amount and status
+            const invoice = await db.query.invoices.findFirst({
+              where: (invoices, { eq }) => eq(invoices.id, payment.invoiceId!),
+            })
 
-          if (tab) {
-            const newPaidAmount = parseFloat(tab.paidAmount) + parseFloat(payment.amount)
-            const newStatus = newPaidAmount >= parseFloat(tab.totalAmount) ? 'paid' : 'partial'
+            if (invoice) {
+              const newPaidAmount = parseFloat(invoice.paidAmount) + parseFloat(payment.amount)
+              const newStatus = newPaidAmount >= parseFloat(invoice.totalAmount) ? 'paid' : 'partial'
 
-            await db
-              .update(tabs)
-              .set({
-                paidAmount: newPaidAmount.toFixed(2),
-                status: newStatus,
-                updatedAt: new Date(),
+              await db
+                .update(invoices)
+                .set({
+                  paidAmount: newPaidAmount.toFixed(2),
+                  status: newStatus,
+                  paidAt: newStatus === 'paid' ? new Date() : invoice.paidAt,
+                  updatedAt: new Date(),
+                })
+                .where(eq(invoices.id, invoice.id))
+              
+              logger.info('Invoice payment processed', {
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                paymentAmount: payment.amount,
+                newPaidAmount,
+                newStatus
               })
-              .where(eq(tabs.id, tab.id))
+            }
+          } 
+          // Otherwise it's a tab payment
+          else if (payment.tabId) {
+            const tab = await db.query.tabs.findFirst({
+              where: (tabs, { eq }) => eq(tabs.id, payment.tabId),
+            })
+
+            if (tab) {
+              const newPaidAmount = parseFloat(tab.paidAmount) + parseFloat(payment.amount)
+              const newStatus = newPaidAmount >= parseFloat(tab.totalAmount) ? 'paid' : 'partial'
+
+              await db
+                .update(tabs)
+                .set({
+                  paidAmount: newPaidAmount.toFixed(2),
+                  status: newStatus,
+                  updatedAt: new Date(),
+                })
+                .where(eq(tabs.id, tab.id))
+            }
           }
         }
         break

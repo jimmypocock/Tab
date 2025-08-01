@@ -30,7 +30,8 @@ export async function getTeamMembers(organizationId: string) {
       invited_at,
       user:users!user_id (
         id,
-        email
+        email,
+        raw_user_meta_data
       )
     `)
     .eq('organization_id', organizationId)
@@ -45,10 +46,10 @@ export async function getTeamMembers(organizationId: string) {
   
   // Get pending invitations
   const { data: invitations, error: invError } = await supabase
-    .from('invitation_tokens')
+    .from('invitations')
     .select('*')
     .eq('organization_id', organizationId)
-    .is('accepted_at', null)
+    .eq('status', 'pending')
     .gte('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
   
@@ -62,7 +63,7 @@ export async function getTeamMembers(organizationId: string) {
     user: member.user ? {
       id: member.user.id,
       email: member.user.email,
-      full_name: undefined
+      full_name: member.user.raw_user_meta_data?.full_name || member.user.raw_user_meta_data?.name || undefined
     } : null,
     role: member.role,
     status: member.status,
@@ -126,11 +127,11 @@ export async function inviteTeamMember(
     
     // First check if there's already a pending invitation
     const { data: existingInvitation } = await supabase
-      .from('invitation_tokens')
+      .from('invitations')
       .select('id, email')
       .eq('organization_id', organizationId)
       .eq('email', email)
-      .is('accepted_at', null)
+      .eq('status', 'pending')
       .gte('expires_at', new Date().toISOString())
       .single()
     
@@ -365,13 +366,13 @@ export async function cancelInvitation(organizationId: string, invitationId: str
       return { error: 'You do not have permission to cancel invitations' }
     }
     
-    // Delete the invitation token
+    // Cancel the invitation
     const { error: deleteError } = await supabase
-      .from('invitation_tokens')
-      .delete()
+      .from('invitations')
+      .update({ status: 'canceled', updated_at: new Date().toISOString() })
       .eq('id', invitationId)
       .eq('organization_id', organizationId)
-      .is('accepted_at', null)
+      .eq('status', 'pending')
     
     if (deleteError) {
       console.error('Error canceling invitation:', deleteError)
@@ -408,11 +409,11 @@ export async function resendInvitation(organizationId: string, invitationId: str
     
     // Get the invitation details
     const { data: invitation } = await supabase
-      .from('invitation_tokens')
+      .from('invitations')
       .select('*')
       .eq('id', invitationId)
       .eq('organization_id', organizationId)
-      .is('accepted_at', null)
+      .eq('status', 'pending')
       .single()
     
     if (!invitation) {
@@ -438,7 +439,7 @@ export async function resendInvitation(organizationId: string, invitationId: str
       inviterName: inviter?.email || 'A team member',
       organizationName: organization?.name || 'the organization',
       token: invitation.token,
-      customMessage: invitation.custom_message,
+      customMessage: invitation.message,
     })
     
     revalidatePath('/settings/team')

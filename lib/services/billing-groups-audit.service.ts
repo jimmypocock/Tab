@@ -9,7 +9,7 @@ import {
   type LineItem,
 } from '@/lib/db/schema'
 import { eq, and, desc, gte, lte, or, ilike } from 'drizzle-orm'
-import { generateId } from '@/lib/utils'
+import { generateId } from '@/lib/utils/index'
 import { logger } from '@/lib/logger'
 
 export interface AuditEvent {

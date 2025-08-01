@@ -223,6 +223,28 @@ export class OrganizationService {
   }
 
   /**
+   * Get user's role in an organization
+   */
+  static async getUserRole(
+    userId: string,
+    organizationId: string
+  ): Promise<OrganizationRole | null> {
+    const [orgUser] = await db
+      .select()
+      .from(organizationUsers)
+      .where(
+        and(
+          eq(organizationUsers.userId, userId),
+          eq(organizationUsers.organizationId, organizationId),
+          eq(organizationUsers.status, 'active')
+        )
+      )
+      .limit(1)
+
+    return orgUser ? (orgUser.role as OrganizationRole) : null
+  }
+
+  /**
    * Check role hierarchy
    */
   static checkRoleHierarchy(userRole: OrganizationRole, requiredRole: OrganizationRole): boolean {

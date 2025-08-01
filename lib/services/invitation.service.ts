@@ -42,7 +42,7 @@ export class InvitationService {
 
     // Create the invitation record
     const { data: invitation, error } = await supabase
-      .from('invitation_tokens')
+      .from('invitations')
       .insert({
         organization_id: organizationId,
         email,
@@ -50,9 +50,7 @@ export class InvitationService {
         invited_by: invitedBy,
         token,
         expires_at: expiresAt.toISOString(),
-        department,
-        title,
-        custom_message: customMessage,
+        message: customMessage,
       })
       .select()
       .single()
@@ -184,7 +182,7 @@ export class InvitationService {
     const supabase = createAdminClient()
 
     const { data, error } = await supabase
-      .from('pending_invitations')
+      .from('invitations')
       .select('*')
       .eq('organization_id', organizationId)
       .eq('status', 'pending')
@@ -205,10 +203,10 @@ export class InvitationService {
     const supabase = createAdminClient()
 
     const { error } = await supabase
-      .from('invitation_tokens')
-      .delete()
+      .from('invitations')
+      .update({ status: 'canceled', updated_at: new Date().toISOString() })
       .eq('id', invitationId)
-      .is('accepted_at', null)
+      .eq('status', 'pending')
 
     if (error) {
       console.error('Error canceling invitation:', error)
@@ -226,14 +224,14 @@ export class InvitationService {
 
     // Get the invitation details
     const { data: invitation, error: fetchError } = await supabase
-      .from('invitation_tokens')
+      .from('invitations')
       .select(`
         *,
         organizations (name),
-        users!invitation_tokens_invited_by_fkey (email, raw_user_meta_data)
+        users!invitations_invited_by_fkey (email, raw_user_meta_data)
       `)
       .eq('id', invitationId)
-      .is('accepted_at', null)
+      .eq('status', 'pending')
       .single()
 
     if (fetchError || !invitation) {
@@ -247,7 +245,7 @@ export class InvitationService {
     newExpiresAt.setDate(newExpiresAt.getDate() + 7)
 
     const { error: updateError } = await supabase
-      .from('invitation_tokens')
+      .from('invitations')
       .update({
         token: newToken,
         expires_at: newExpiresAt.toISOString(),
@@ -267,7 +265,7 @@ export class InvitationService {
       inviterName,
       organizationName: invitation.organizations?.name || 'the organization',
       token: newToken,
-      customMessage: invitation.custom_message,
+      customMessage: invitation.message,
     })
 
     return { success: true }
