@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withApiAuth } from '@/lib/api/middleware'
 import { z } from 'zod'
 import { BillingGroupService } from '@/lib/services/billing-group.service'
+import { BillingGroupDeletionService } from '@/lib/services/billing-group-deletion.service'
+import { db } from '@/lib/db'
+import { apiKeys } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 import { logger } from '@/lib/logger'
 
 // Validation schemas
@@ -13,6 +17,11 @@ const updateBillingGroupSchema = z.object({
   authorization_code: z.string().optional(),
   po_number: z.string().optional(),
   metadata: z.record(z.any()).optional(),
+})
+
+const deleteBillingGroupSchema = z.object({
+  moveLineItemsToGroupId: z.string().uuid().optional(),
+  force: z.boolean().optional().default(false),
 })
 
 // GET /api/v1/billing-groups/:id - Get a billing group
@@ -93,18 +102,109 @@ export const PUT = withApiAuth(async (req, context, { params }) => {
 // DELETE /api/v1/billing-groups/:id - Delete a billing group
 export const DELETE = withApiAuth(async (req, context, { params }) => {
   try {
-    const { id } = params
+    const { id: billingGroupId } = params
     
-    // TODO: Implement deletion logic
-    // Should check if there are any line items assigned
-    // Should handle reassignment or prevent deletion
-    
-    return NextResponse.json(
-      { error: 'Billing group deletion not yet implemented' },
-      { status: 501 }
+    // Parse request body for deletion options
+    let deleteOptions = {}
+    try {
+      const body = await req.json()
+      const validation = deleteBillingGroupSchema.safeParse(body)
+      if (validation.success) {
+        deleteOptions = validation.data
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid deletion options', details: validation.error.errors },
+          { status: 400 }
+        )
+      }
+    } catch {
+      // Empty body is OK - use defaults
+    }
+
+    // First, validate if deletion is possible
+    const validation = await BillingGroupDeletionService.validateDeletion(
+      billingGroupId,
+      context.organizationId
     )
-  } catch (error) {
-    logger.error('Error deleting billing group', { error, billingGroupId: params.id, organizationId: context.organizationId })
+
+    // If force=true and user is admin, skip validation
+    const isForced = (deleteOptions as any).force === true
+    if (!validation.canDelete && !isForced) {
+      return NextResponse.json(
+        { 
+          error: 'Cannot delete billing group',
+          blockers: validation.blockers,
+          warnings: validation.warnings,
+          billingGroup: validation.billingGroup
+        },
+        { status: 409 }
+      )
+    }
+
+    // If using moveLineItemsToGroupId, validate the target group exists
+    const moveLineItemsToGroupId = (deleteOptions as any).moveLineItemsToGroupId
+    if (moveLineItemsToGroupId) {
+      const targetGroup = await BillingGroupService.getBillingGroupById(moveLineItemsToGroupId)
+      if (!targetGroup) {
+        return NextResponse.json(
+          { error: 'Target billing group for line items not found' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Get the API key to find the user ID
+    const apiKey = await db.query.apiKeys.findFirst({
+      where: eq(apiKeys.id, context.apiKeyId),
+      columns: { createdBy: true }
+    })
+
+    const userId = apiKey?.createdBy || 'system'
+
+    // Perform the deletion
+    await BillingGroupDeletionService.deleteBillingGroup(
+      billingGroupId,
+      context.organizationId,
+      userId,
+      {
+        skipValidation: isForced,
+        moveLineItemsToGroupId
+      }
+    )
+
+    return NextResponse.json({
+      message: 'Billing group deleted successfully',
+      warnings: validation.warnings
+    })
+  } catch (error: any) {
+    logger.error('Error deleting billing group', { 
+      error, 
+      billingGroupId: params.id, 
+      organizationId: context.organizationId 
+    })
+
+    // Handle specific error types
+    if (error.message && error.message.includes('Cannot delete billing group')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 409 }
+      )
+    }
+
+    if (error.message && error.message.includes('not found')) {
+      return NextResponse.json(
+        { error: 'Billing group not found' },
+        { status: 404 }
+      )
+    }
+
+    if (error.message && error.message.includes('permission')) {
+      return NextResponse.json(
+        { error: 'Insufficient permissions' },
+        { status: 403 }
+      )
+    }
+
     return NextResponse.json(
       { error: 'Failed to delete billing group' },
       { status: 500 }

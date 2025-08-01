@@ -1,82 +1,86 @@
-import { NextRequest } from 'next/server'
-import { db } from '@/lib/db/client'
-import { lineItems, tabs } from '@/lib/db/schema'
-import { validateApiKey, createApiResponse, createApiError, parseJsonBody } from '@/lib/api/middleware'
-import { createLineItemSchema } from '@/lib/api/validation'
+import { NextRequest, NextResponse } from 'next/server'
+import { withApiAuth } from '@/lib/api/middleware'
+import { z } from 'zod'
+import { LineItemCrudService } from '@/lib/services/line-item-crud.service'
+import { db } from '@/lib/db'
+import { apiKeys } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { logger } from '@/lib/logger'
 
-export async function POST(request: NextRequest) {
-  // Validate API key
-  const { valid, context, error } = await validateApiKey(request)
-  if (!valid) {
-    return createApiError((error as Error)?.message || 'Unauthorized', 401)
-  }
+// Validation schema
+const createLineItemSchema = z.object({
+  tabId: z.string().uuid(),
+  description: z.string().min(1).max(500),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().positive(),
+  billingGroupId: z.string().uuid().optional(),
+  metadata: z.record(z.any()).optional(),
+})
 
-  // Parse and validate request body
-  const body = await parseJsonBody(request)
-  if (!body) {
-    return createApiError('Invalid JSON body', 400)
-  }
-
-  const validation = createLineItemSchema.safeParse(body)
-  if (!validation.success) {
-    return createApiError('Invalid request data', 400, 'VALIDATION_ERROR', validation.error.issues)
-  }
-
-  const data = validation.data
-
+// POST /api/v1/line-items - Create a new line item
+export const POST = withApiAuth(async (req, context, { params }) => {
   try {
-    // Verify tab belongs to merchant
-    const tab = await db.query.tabs.findFirst({
-      where: (tabs, { eq, and }) => 
-        and(
-          eq(tabs.id, data.tabId),
-          eq(tabs.merchantId, context!.merchantId)
-        ),
-    })
-
-    if (!tab) {
-      return createApiError('Tab not found', 404, 'NOT_FOUND')
+    // Parse request body
+    const body = await req.json()
+    const validation = createLineItemSchema.safeParse(body)
+    
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation error', details: validation.error.issues },
+        { status: 400 }
+      )
     }
 
-    // Calculate total
-    const total = data.quantity * data.unitPrice
+    const data = validation.data
+
+    // Get user ID from API key
+    const apiKey = await db.query.apiKeys.findFirst({
+      where: eq(apiKeys.id, context.apiKeyId),
+      columns: { createdBy: true }
+    })
+    const userId = apiKey?.createdBy || 'system'
 
     // Create line item
-    const [lineItem] = await db.insert(lineItems).values({
-      tabId: data.tabId,
-      description: data.description,
-      quantity: data.quantity,
-      unitPrice: data.unitPrice.toFixed(2),
-      total: total.toFixed(2),
-      metadata: data.metadata,
-    }).returning()
+    const newLineItem = await LineItemCrudService.createLineItem(
+      data,
+      context.organizationId,
+      userId
+    )
 
-    // Update tab totals
-    const allLineItems = await db.query.lineItems.findMany({
-      where: (lineItems, { eq }) => eq(lineItems.tabId, data.tabId),
+    return NextResponse.json({
+      data: newLineItem,
+      message: 'Line item created successfully'
+    }, { status: 201 })
+  } catch (error: any) {
+    logger.error('Error creating line item', { 
+      error, 
+      organizationId: context.organizationId 
     })
 
-    const subtotal = allLineItems.reduce((sum, item) => 
-      sum + parseFloat(item.total), 0
+    if (error.message && error.message.includes('not found')) {
+      return NextResponse.json(
+        { error: 'Tab or billing group not found' },
+        { status: 404 }
+      )
+    }
+
+    if (error.message && error.message.includes('access')) {
+      return NextResponse.json(
+        { error: 'Insufficient permissions' },
+        { status: 403 }
+      )
+    }
+
+    if (error.message && error.message.includes('Validation')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json(
+      { error: 'Failed to create line item' },
+      { status: 500 }
     )
-    const taxAmount = subtotal * 0.08 // Simple 8% tax for MVP
-    const totalAmount = subtotal + taxAmount
-
-    await db
-      .update(tabs)
-      .set({
-        subtotal: subtotal.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
-        totalAmount: totalAmount.toFixed(2),
-        updatedAt: new Date(),
-      })
-      .where(eq(tabs.id, data.tabId))
-
-    return createApiResponse(lineItem, 201)
-  } catch (error) {
-    logger.error('Error creating line item', { error, tabId: data.tabId, merchantId: context!.merchantId })
-    return createApiError('Failed to create line item', 500, 'INTERNAL_ERROR')
   }
-}
+})
