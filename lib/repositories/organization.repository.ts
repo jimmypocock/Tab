@@ -3,7 +3,7 @@
  */
 
 import { eq, and, or, like } from 'drizzle-orm'
-import { organizations, organizationUsers } from '@/lib/db/schema'
+import { organizations, organizationUsers, invitations } from '@/lib/db/schema'
 import { BaseRepository } from './base.repository'
 
 export interface OrganizationWithMembers {
@@ -36,8 +36,8 @@ export class OrganizationRepository extends BaseRepository {
   }
 
   async findByUserId(userId: string): Promise<OrganizationWithMembers[]> {
-    const memberOrgs = await this.db.query.organizationMembers.findMany({
-      where: eq(organizationMembers.userId, userId),
+    const memberOrgs = await this.db.query.organizationUsers.findMany({
+      where: eq(organizationUsers.userId, userId),
       with: {
         organization: true
       }
@@ -105,11 +105,28 @@ export class OrganizationRepository extends BaseRepository {
     return updated
   }
 
+  async updateMember(organizationId: string, userId: string, updates: {
+    status?: 'active' | 'inactive'
+    department?: string | null
+    title?: string | null
+  }) {
+    const [updated] = await this.db
+      .update(organizationUsers)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(
+        eq(organizationUsers.organizationId, organizationId),
+        eq(organizationUsers.userId, userId)
+      ))
+      .returning()
+    
+    return updated
+  }
+
   async getMemberRole(organizationId: string, userId: string): Promise<string | null> {
-    const member = await this.db.query.organizationMembers.findFirst({
+    const member = await this.db.query.organizationUsers.findFirst({
       where: and(
-        eq(organizationMembers.organizationId, organizationId),
-        eq(organizationMembers.userId, userId)
+        eq(organizationUsers.organizationId, organizationId),
+        eq(organizationUsers.userId, userId)
       )
     })
     
@@ -123,7 +140,7 @@ export class OrganizationRepository extends BaseRepository {
     invitedBy: string
     expiresAt: Date
   }) {
-    const [invitation] = await this.db.insert(organizationInvitations)
+    const [invitation] = await this.db.insert(invitations)
       .values({
         ...data,
         status: 'pending',
@@ -135,8 +152,8 @@ export class OrganizationRepository extends BaseRepository {
   }
 
   async findInvitationByToken(token: string) {
-    return this.db.query.organizationInvitations.findFirst({
-      where: eq(organizationInvitations.token, token),
+    return this.db.query.invitations.findFirst({
+      where: eq(invitations.token, token),
       with: {
         organization: true
       }
@@ -145,16 +162,57 @@ export class OrganizationRepository extends BaseRepository {
 
   async acceptInvitation(invitationId: string) {
     const [updated] = await this.db
-      .update(organizationInvitations)
+      .update(invitations)
       .set({
         status: 'accepted',
         acceptedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(organizationInvitations.id, invitationId))
+      .where(eq(invitations.id, invitationId))
       .returning()
     
     return updated
+  }
+
+  async getPendingInvitations(organizationId: string) {
+    const pendingInvites = await this.db.query.invitations.findMany({
+      where: and(
+        eq(invitations.organizationId, organizationId),
+        eq(invitations.status, 'pending')
+      ),
+      with: {
+        invitedBy: {
+          columns: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true
+          }
+        }
+      },
+      orderBy: (invitations, { desc }) => [desc(invitations.createdAt)]
+    })
+
+    // Filter out expired invitations
+    const now = new Date()
+    return pendingInvites
+      .filter(inv => new Date(inv.expiresAt) > now)
+      .map(inv => ({
+        id: inv.id,
+        email: inv.email,
+        role: inv.role,
+        status: inv.status,
+        message: inv.message,
+        expiresAt: inv.expiresAt,
+        createdAt: inv.createdAt,
+        invitedBy: {
+          id: inv.invitedBy?.id || inv.invitedById,
+          email: inv.invitedBy?.email || 'Unknown',
+          name: inv.invitedBy?.firstName && inv.invitedBy?.lastName 
+            ? `${inv.invitedBy.firstName} ${inv.invitedBy.lastName}`
+            : inv.invitedBy?.email || 'Unknown'
+        }
+      }))
   }
 
   async search(query: string): Promise<OrganizationWithMembers[]> {

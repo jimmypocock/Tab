@@ -153,6 +153,60 @@ export class InvitationService {
   }
 
   /**
+   * Get invitation details by token
+   */
+  static async getInvitationDetails(token: string) {
+    const supabase = createAdminClient()
+    
+    // Get invitation details
+    const { data: invitation, error } = await supabase
+      .from('invitations')
+      .select(`
+        id,
+        email,
+        role,
+        expires_at,
+        status,
+        organizations (
+          id,
+          name
+        )
+      `)
+      .eq('token', token)
+      .single()
+
+    if (error || !invitation) {
+      logger.error('Error fetching invitation details', error as Error, {
+        token: 'provided'
+      })
+      throw new Error('Invalid or expired invitation')
+    }
+
+    // Check if invitation is expired
+    if (new Date(invitation.expires_at) < new Date()) {
+      throw new Error('This invitation has expired')
+    }
+
+    // Check if invitation is already accepted
+    if (invitation.status === 'accepted') {
+      throw new Error('This invitation has already been accepted')
+    }
+
+    // Check if invitation was canceled
+    if (invitation.status === 'canceled') {
+      throw new Error('This invitation has been canceled')
+    }
+
+    return {
+      email: invitation.email,
+      role: invitation.role,
+      organizationName: invitation.organizations?.name || 'the organization',
+      organizationId: invitation.organizations?.id,
+      expiresAt: invitation.expires_at
+    }
+  }
+
+  /**
    * Accept an invitation
    */
   static async acceptInvitation(token: string, userId: string) {

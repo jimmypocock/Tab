@@ -288,6 +288,123 @@ export class OrganizationManagementService {
   }
 
   /**
+   * Get team members
+   */
+  async getTeamMembers(organizationId: string) {
+    const org = await this.orgRepo.findById(organizationId)
+    
+    if (!org) {
+      throw new ValidationError('Organization not found')
+    }
+
+    return org.members || []
+  }
+
+  /**
+   * Update team member details
+   */
+  async updateTeamMember(
+    organizationId: string,
+    memberUserId: string,
+    updates: {
+      role?: 'admin' | 'member' | 'viewer'
+      status?: 'active' | 'inactive'
+      department?: string | null
+      title?: string | null
+    },
+    requesterId: string
+  ) {
+    // Check permissions
+    const requesterRole = await this.orgRepo.getMemberRole(organizationId, requesterId)
+    if (!requesterRole || !['owner', 'admin'].includes(requesterRole)) {
+      throw new BusinessRuleError('Insufficient permissions to update team members')
+    }
+
+    // Get current member to check role
+    const org = await this.orgRepo.findById(organizationId)
+    const currentMember = org?.members?.find((m: any) => m.userId === memberUserId)
+    
+    if (!currentMember) {
+      throw new ValidationError('Team member not found')
+    }
+
+    // Prevent demoting the last owner
+    if (updates.role && updates.role !== 'owner' && currentMember.role === 'owner') {
+      const ownerCount = org?.members?.filter((m: any) => m.role === 'owner' && m.status === 'active').length || 0
+      
+      if (ownerCount <= 1) {
+        throw new BusinessRuleError('Cannot demote the last owner of the organization')
+      }
+    }
+
+    // Update member - handle role separately if changing
+    if (updates.role && updates.role !== currentMember.role) {
+      await this.orgRepo.updateMemberRole(organizationId, memberUserId, updates.role)
+    }
+
+    // Update other member details
+    const updatedMember = await this.orgRepo.updateMember(organizationId, memberUserId, {
+      status: updates.status,
+      department: updates.department,
+      title: updates.title,
+    })
+
+    this.logger.info('Team member updated', {
+      organizationId,
+      requesterId,
+      memberUserId,
+      updates: Object.keys(updates),
+    })
+
+    return updatedMember
+  }
+
+  /**
+   * Remove team member
+   */
+  async removeTeamMember(
+    organizationId: string,
+    memberUserId: string,
+    requesterId: string
+  ) {
+    // Check permissions
+    const requesterRole = await this.orgRepo.getMemberRole(organizationId, requesterId)
+    if (!requesterRole || !['owner', 'admin'].includes(requesterRole)) {
+      throw new BusinessRuleError('Insufficient permissions to remove team members')
+    }
+
+    // Prevent removing yourself
+    if (memberUserId === requesterId) {
+      throw new BusinessRuleError('You cannot remove yourself from the organization')
+    }
+
+    // Get member to check role
+    const org = await this.orgRepo.findById(organizationId)
+    const member = org?.members?.find((m: any) => m.userId === memberUserId)
+    
+    if (!member) {
+      throw new ValidationError('Team member not found')
+    }
+
+    // Prevent removing the last owner
+    if (member.role === 'owner') {
+      const ownerCount = org?.members?.filter((m: any) => m.role === 'owner' && m.status === 'active').length || 0
+      
+      if (ownerCount <= 1) {
+        throw new BusinessRuleError('Cannot remove the last owner of the organization')
+      }
+    }
+
+    await this.orgRepo.removeMember(organizationId, memberUserId)
+
+    this.logger.info('Team member removed', {
+      organizationId,
+      requesterId,
+      removedUserId: memberUserId,
+    })
+  }
+
+  /**
    * Create default API keys for a new merchant organization
    */
   private async createDefaultApiKeys(organizationId: string) {
